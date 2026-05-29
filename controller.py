@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-ComEd Hourly Price → Ecobee + Tesla Climate & Charging Controller
+ComEd Hourly Price -> Ecobee + Tesla Climate & Charging Controller
 Runs every 5 minutes via run.sh
 """
 
@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
-# ── CONFIG ────────────────────────────────────────────────────────────────────
+# -- CONFIG -------------------------------------------------------------------
 
 HA_URL          = "http://homeassistant.local:8123"
 HA_TOKEN        = "***REMOVED***"
@@ -33,7 +33,7 @@ TESLA_RESUME_PRICE     = 5.0
 TESLA_PROTECT_START    = 12
 TESLA_PROTECT_END      = 19
 
-# Gmail settings
+# Gmail
 GMAIL_USER    = "climatecontrol.pi@gmail.com"
 GMAIL_PASS    = "***REMOVED***"
 NOTIFY_EMAILS = [
@@ -53,14 +53,14 @@ PRICE_LOW    = 5.0
 PRICE_NORMAL = 9.0
 PRICE_HIGH   = 12.0
 
-# Capacity charge tracking
+# Capacity
 CAPACITY_MONTHS   = [6, 7, 8, 9]
 CAPACITY_HOURS    = range(12, 19)
 CAPACITY_TEMP_C   = 30.0
 CAPACITY_PRICE    = 10.0
 CAPACITY_DAY_TEMP = 30.0
 
-# Dynamic thermostat scale (daytime) centered on 23.5C
+# Dynamic thermostat scale daytime centered on 23.5C
 DYNAMIC_COOL = [
     (-99,  1.0, 22.0),
     (1.0,  3.0, 22.5),
@@ -68,28 +68,27 @@ DYNAMIC_COOL = [
     (5.0,  8.0, 23.5),
     (8.0,  10.0, 24.0),
     (10.0, 12.0, 24.5),
-    (12.0, 99,  25.0),
+    (12.0, 99,   25.0),
 ]
 
-# Dynamic thermostat scale (sleep) centered on 21.5C
+# Dynamic thermostat scale sleep centered on 21.5C
 DYNAMIC_COOL_SLEEP = [
     (-99,  3.0, 20.5),
     (3.0,  5.0, 21.0),
     (5.0,  8.0, 21.5),
     (8.0,  12.0, 22.0),
-    (12.0, 99,  23.0),
+    (12.0, 99,   23.0),
 ]
 
 DYNAMIC_HEAT = 19.5
 
-# Logging
 logging.basicConfig(
     filename="/config/comed_ecobee/controller.log",
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(message)s"
 )
 
-# ── STATE ─────────────────────────────────────────────────────────────────────
+# -- STATE --------------------------------------------------------------------
 
 def load_state():
     try:
@@ -116,21 +115,20 @@ def load_state():
             "tesla_last_check_min":    -1,
             "last_hour_avg":           0.0,
             "tesla_plugged_in":        False,
+            "tesla_wake_hour":         -1,
         }
 
 def save_state(state):
     with open("/config/comed_ecobee/state.json", "w") as f:
         json.dump(state, f)
 
-# ── HELPERS ───────────────────────────────────────────────────────────────────
+# -- HELPERS ------------------------------------------------------------------
 
 def is_sleep_time():
-    hour = datetime.now().hour
-    return hour >= 22 or hour < 6
+    return datetime.now().hour >= 22 or datetime.now().hour < 6
 
 def is_overnight_charging_window():
-    hour = datetime.now().hour
-    return 0 <= hour < 6
+    return 0 <= datetime.now().hour < 6
 
 def get_dynamic_cool(price, sleep=False):
     scale = DYNAMIC_COOL_SLEEP if sleep else DYNAMIC_COOL
@@ -146,17 +144,21 @@ def smooth_setpoint(current, target, max_step=1.0):
         return max(current - max_step, target)
     return current
 
-# ── PRICE ─────────────────────────────────────────────────────────────────────
+# -- PRICE --------------------------------------------------------------------
 
 def get_comed_price():
     for attempt in range(2):
         try:
-            url = "https://hourlypricing.comed.com/api?type=5minutefeed"
-            r = requests.get(url, timeout=10)
+            r = requests.get(
+                "https://hourlypricing.comed.com/api?type=5minutefeed",
+                timeout=10
+            )
             r.raise_for_status()
             current = float(r.json()[0]["price"])
-            url2 = "https://hourlypricing.comed.com/api?type=currenthouraverage"
-            r2 = requests.get(url2, timeout=10)
+            r2 = requests.get(
+                "https://hourlypricing.comed.com/api?type=currenthouraverage",
+                timeout=10
+            )
             r2.raise_for_status()
             avg = float(r2.json()[0]["price"])
             logging.info(f"5-min price: {current:.2f}c | Hour avg: {avg:.2f}c")
@@ -166,38 +168,35 @@ def get_comed_price():
                 logging.warning(f"Price fetch failed, retrying in 30s: {e}")
                 time.sleep(30)
             else:
-                logging.error(f"Price fetch failed twice, skipping cycle: {e}")
+                logging.error(f"Price fetch failed twice: {e}")
                 raise
 
 def price_tier(price):
-    if price < PRICE_FREE:
-        return "free"
-    elif price < PRICE_LOW:
-        return "low"
-    elif price < PRICE_NORMAL:
-        return "normal"
-    elif price < PRICE_HIGH:
-        return "high"
-    else:
-        return "peak"
+    if price < PRICE_FREE:   return "free"
+    elif price < PRICE_LOW:  return "low"
+    elif price < PRICE_NORMAL: return "normal"
+    elif price < PRICE_HIGH: return "high"
+    else:                    return "peak"
 
-# ── WEATHER ───────────────────────────────────────────────────────────────────
+# -- WEATHER ------------------------------------------------------------------
 
 def get_weather():
     for attempt in range(2):
         try:
-            url = ("https://api.open-meteo.com/v1/forecast"
-                   "?latitude=41.85&longitude=-87.65"
-                   "&hourly=temperature_2m"
-                   "&temperature_unit=celsius"
-                   "&timezone=America%2FChicago"
-                   "&forecast_days=2")
-            r = requests.get(url, timeout=10)
+            r = requests.get(
+                "https://api.open-meteo.com/v1/forecast"
+                "?latitude=41.85&longitude=-87.65"
+                "&hourly=temperature_2m"
+                "&temperature_unit=celsius"
+                "&timezone=America%2FChicago"
+                "&forecast_days=2",
+                timeout=10
+            )
             r.raise_for_status()
             return r.json()
         except Exception as e:
             if attempt == 0:
-                logging.warning(f"Weather fetch failed, retrying in 30s: {e}")
+                logging.warning(f"Weather fetch failed, retrying: {e}")
                 time.sleep(30)
             else:
                 logging.warning(f"Weather fetch failed twice: {e}")
@@ -207,14 +206,14 @@ def analyze_tomorrow_weather():
     data = get_weather()
     if not data:
         return None
-    times = data["hourly"]["time"]
-    temps = data["hourly"]["temperature_2m"]
+    times    = data["hourly"]["time"]
+    temps    = data["hourly"]["temperature_2m"]
     tomorrow = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
-    tomorrow_temps = [temps[i] for i, t in enumerate(times) if t.startswith(tomorrow)]
-    if not tomorrow_temps:
+    t_temps  = [temps[i] for i, t in enumerate(times) if t.startswith(tomorrow)]
+    if not t_temps:
         return None
-    max_temp      = max(tomorrow_temps)
-    afternoon     = tomorrow_temps[13:19]
+    max_temp      = max(t_temps)
+    afternoon     = t_temps[13:19]
     max_afternoon = max(afternoon) if afternoon else max_temp
     return {
         "max_temp":       max_temp,
@@ -226,25 +225,22 @@ def analyze_tomorrow_weather():
 
 def get_tonight_price_prediction():
     try:
-        forecast = analyze_tomorrow_weather()
-        if not forecast:
+        f = analyze_tomorrow_weather()
+        if not f:
             return None, "Forecast unavailable"
-        if forecast["very_expensive"]:
-            return 8.0, "Potentially expensive tonight"
-        elif forecast["expensive"]:
-            return 5.0, "Moderate prices expected tonight"
-        else:
-            return 3.0, "Cheap prices expected tonight"
+        if f["very_expensive"]: return 8.0, "Potentially expensive tonight"
+        elif f["expensive"]:    return 5.0, "Moderate prices expected tonight"
+        else:                   return 3.0, "Cheap prices expected tonight"
     except:
         return None, "Forecast unavailable"
 
 def should_precool():
-    forecast = analyze_tomorrow_weather()
-    if not forecast:
+    f = analyze_tomorrow_weather()
+    if not f:
         return False, None
-    return forecast["expensive"] or forecast["very_expensive"], forecast
+    return f["expensive"] or f["very_expensive"], f
 
-# ── ECOBEE ────────────────────────────────────────────────────────────────────
+# -- ECOBEE -------------------------------------------------------------------
 
 def get_ha_state():
     for attempt in range(2):
@@ -252,16 +248,16 @@ def get_ha_state():
             headers = {"Authorization": f"Bearer {HA_TOKEN}"}
             r = requests.get(
                 f"{HA_URL}/api/states/{CLIMATE_ENTITY}",
-                headers=headers, timeout=10
+                headers=headers, timeout=30
             )
             r.raise_for_status()
             return r.json()
         except Exception as e:
             if attempt == 0:
-                logging.warning(f"HA state fetch failed, retrying: {e}")
+                logging.warning(f"HA fetch failed, retrying: {e}")
                 time.sleep(30)
             else:
-                logging.error(f"HA state fetch failed twice: {e}")
+                logging.error(f"HA fetch failed twice: {e}")
                 raise
 
 def set_temperature(heat_c, cool_c):
@@ -296,30 +292,29 @@ def set_temperature(heat_c, cool_c):
             return
         except Exception as e:
             if attempt == 0:
-                logging.warning(f"Set temperature failed, retrying: {e}")
+                logging.warning(f"Set temp failed, retrying: {e}")
                 time.sleep(15)
             else:
-                logging.error(f"Set temperature failed twice: {e}")
+                logging.error(f"Set temp failed twice: {e}")
                 raise
 
-# ── CAPACITY ──────────────────────────────────────────────────────────────────
+# -- CAPACITY -----------------------------------------------------------------
 
 def check_capacity_day(state):
     now = datetime.now()
     if now.hour == 0 and not state.get("capacity_day_checked"):
-        forecast = analyze_tomorrow_weather()
-        if forecast and forecast["capacity_day"] and now.month in CAPACITY_MONTHS:
+        f = analyze_tomorrow_weather()
+        if f and f["capacity_day"] and now.month in CAPACITY_MONTHS:
             state["capacity_day"] = True
             logging.info("Tomorrow flagged as capacity day")
             send_email(
                 "Warning: Capacity Day Tomorrow",
-                f"Tomorrow is predicted to be a capacity day.\n"
-                f"Forecast afternoon high: {forecast['max_afternoon']:.1f}C\n\n"
-                f"The system will:\n"
-                f"- Hold thermostat at 23.5C baseline all day\n"
-                f"- Stop Tesla charging noon-7 PM\n"
+                f"Tomorrow afternoon forecast: {f['max_afternoon']:.1f}C\n\n"
+                f"System will:\n"
+                f"- Hold thermostat at 23.5C all day\n"
+                f"- Stop Tesla charging noon-7PM\n"
                 f"- No pre-cooling below comfort baseline\n\n"
-                f"Tip: Avoid heavy appliance use 2-6 PM tomorrow."
+                f"Avoid heavy appliance use 2-6 PM tomorrow."
             )
         else:
             state["capacity_day"] = False
@@ -330,18 +325,13 @@ def check_capacity_day(state):
 
 def is_potential_peak_hour(price, hour_avg):
     now = datetime.now()
-    if now.month not in CAPACITY_MONTHS:
-        return False
-    if now.hour not in CAPACITY_HOURS:
-        return False
-    if now.weekday() >= 5:
-        return False
+    if now.month not in CAPACITY_MONTHS: return False
+    if now.hour not in CAPACITY_HOURS:   return False
+    if now.weekday() >= 5:               return False
     try:
-        weather = get_weather()
-        if weather:
-            cur_temp = weather["hourly"]["temperature_2m"][0]
-            if cur_temp < CAPACITY_TEMP_C:
-                return False
+        w = get_weather()
+        if w and w["hourly"]["temperature_2m"][0] < CAPACITY_TEMP_C:
+            return False
     except:
         pass
     return hour_avg >= CAPACITY_PRICE
@@ -350,15 +340,12 @@ def handle_capacity_peak(state, hour_avg, current_temp):
     peak_key = f"peak_{datetime.now().strftime('%Y%m%d%H')}"
     if peak_key in state.get("capacity_peaks", {}):
         return state
-    if "capacity_peaks" not in state:
-        state["capacity_peaks"] = {}
-    state["capacity_peaks"][peak_key] = {
-        "price": hour_avg,
-        "temp":  current_temp,
+    state.setdefault("capacity_peaks", {})[peak_key] = {
+        "price": hour_avg, "temp": current_temp,
         "time":  datetime.now().strftime("%Y-%m-%d %H:%M")
     }
-    this_month       = datetime.now().strftime("%Y%m")
-    peaks_this_month = sum(1 for k in state["capacity_peaks"] if k.startswith(f"peak_{this_month}"))
+    this_month = datetime.now().strftime("%Y%m")
+    peaks_month = sum(1 for k in state["capacity_peaks"] if k.startswith(f"peak_{this_month}"))
     state.setdefault("tesla_events", []).append({
         "time":   datetime.now().strftime("%I:%M %p"),
         "action": "stopped",
@@ -366,31 +353,27 @@ def handle_capacity_peak(state, hour_avg, current_temp):
         "price":  hour_avg
     })
     send_email(
-        "Warning: Capacity Peak Alert - Reduce Usage Now!",
-        f"Potential capacity peak hour detected!\n\n"
-        f"Current price: {hour_avg:.2f}c/kWh\n"
-        f"Outdoor temp:  {current_temp:.1f}C\n"
+        "Warning: Capacity Peak - Reduce Usage Now!",
+        f"Price: {hour_avg:.2f}c/kWh | Temp: {current_temp:.1f}C\n"
         f"Time: {datetime.now().strftime('%I:%M %p')}\n\n"
-        f"ACTION NEEDED:\n"
         f"- Avoid dishwasher, laundry, oven\n"
-        f"- Tesla charging stopped automatically\n"
-        f"- Thermostat held at comfort baseline\n\n"
-        f"Potential peak hours this month: {peaks_this_month}"
+        f"- Tesla charging stopped\n"
+        f"- Thermostat held at baseline\n\n"
+        f"Peak hours this month: {peaks_month}"
     )
     logging.info(f"Capacity peak: {hour_avg:.2f}c, {current_temp:.1f}C")
     return state
 
-# ── TESLA ─────────────────────────────────────────────────────────────────────
+# -- TESLA --------------------------------------------------------------------
 
 def get_tesla_state():
     headers = {"Authorization": f"Bearer {HA_TOKEN}"}
-
-    r_cable = requests.get(
+    r = requests.get(
         f"{HA_URL}/api/states/{TESLA_CABLE_SENSOR}",
-        headers=headers, timeout=10
+        headers=headers, timeout=30
     )
-    r_cable.raise_for_status()
-    cable_state = r_cable.json()["state"]
+    r.raise_for_status()
+    cable_state = r.json()["state"]
     plugged_in  = cable_state in ["on", "unknown"]
     logging.info(f"Cable state: {cable_state}")
 
@@ -403,22 +386,21 @@ def get_tesla_state():
             "wall_power": 0.0
         }
 
-    r1 = requests.get(f"{HA_URL}/api/states/{TESLA_CHARGING_SENSOR}", headers=headers, timeout=10)
+    r1 = requests.get(f"{HA_URL}/api/states/{TESLA_CHARGING_SENSOR}", headers=headers, timeout=30)
     r1.raise_for_status()
-    r2 = requests.get(f"{HA_URL}/api/states/{TESLA_BATTERY_SENSOR}", headers=headers, timeout=10)
+    r2 = requests.get(f"{HA_URL}/api/states/{TESLA_BATTERY_SENSOR}", headers=headers, timeout=30)
     r2.raise_for_status()
-    r3 = requests.get(f"{HA_URL}/api/states/{TESLA_CHARGE_SWITCH}", headers=headers, timeout=10)
+    r3 = requests.get(f"{HA_URL}/api/states/{TESLA_CHARGE_SWITCH}", headers=headers, timeout=30)
     r3.raise_for_status()
 
     try:
-        r4 = requests.get(f"{HA_URL}/api/states/{WALL_CONNECTOR_POWER}", headers=headers, timeout=10)
+        r4 = requests.get(f"{HA_URL}/api/states/{WALL_CONNECTOR_POWER}", headers=headers, timeout=30)
         wall_power = float(r4.json()["state"])
     except:
         wall_power = 0.0
 
-    battery_raw = r2.json()["state"]
     try:
-        battery_val = float(battery_raw)
+        battery_val = float(r2.json()["state"])
     except:
         battery_val = None
 
@@ -431,7 +413,6 @@ def get_tesla_state():
     }
 
 def wake_tesla():
-    """Wake up Tesla and wait for it to respond."""
     headers = {
         "Authorization": f"Bearer {HA_TOKEN}",
         "Content-Type":  "application/json"
@@ -441,11 +422,11 @@ def wake_tesla():
             f"{HA_URL}/api/services/button/press",
             headers=headers,
             json={"entity_id": TESLA_WAKE_BUTTON},
-            timeout=10
+            timeout=60
         )
         r.raise_for_status()
-        logging.info("Tesla wake up sent - waiting 30s")
-        time.sleep(30)
+        logging.info("Tesla wake up sent - waiting 60s")
+        time.sleep(60)
         return True
     except Exception as e:
         logging.error(f"Tesla wake up failed: {e}")
@@ -459,21 +440,17 @@ def should_check_tesla(hour_avg, state):
     last_check_hour = state.get("tesla_last_check_hour", -1)
 
     price_crossed = (
-        (last_avg <= TESLA_STOP_PRICE < hour_avg) or
-        (last_avg >= TESLA_STOP_PRICE > hour_avg) or
+        (last_avg <= TESLA_STOP_PRICE   < hour_avg) or
+        (last_avg >= TESLA_STOP_PRICE   > hour_avg) or
         (last_avg <= TESLA_RESUME_PRICE < hour_avg) or
         (last_avg >= TESLA_RESUME_PRICE > hour_avg) or
         (last_avg <= TESLA_CHARGE_PRICE < hour_avg) or
         (last_avg >= TESLA_CHARGE_PRICE > hour_avg)
     )
-    if price_crossed:
-        return True
-    if 0 <= hour < 6 and minute % 30 == 0:
-        return True
-    if state.get("tesla_plugged_in") and minute % 30 == 0:
-        return True
-    if last_check_hour != hour:
-        return True
+    if price_crossed:                                    return True
+    if 0 <= hour < 6 and minute % 30 == 0:              return True
+    if state.get("tesla_plugged_in") and minute % 30 == 0: return True
+    if last_check_hour != hour:                          return True
     return False
 
 def set_tesla_charging(enable, reason=""):
@@ -516,10 +493,10 @@ def handle_tesla_charging(hour_avg, state, is_capacity_peak):
         if battery is None:
             if hour_avg <= TESLA_CHARGE_PRICE:
                 # Only wake to start charging once per hour
-                if state.get("tesla_wake_hour") == datetime.now().hour:
+                if state.get("tesla_wake_hour") == now_hour:
                     logging.info("Already attempted wake this hour - skipping")
                     return state
-                state["tesla_wake_hour"] = datetime.now().hour
+                state["tesla_wake_hour"] = now_hour
                 logging.info(f"Tesla asleep - price {hour_avg:.2f}c is cheap, waking up")
                 if wake_tesla():
                     tesla   = get_tesla_state()
@@ -531,7 +508,7 @@ def handle_tesla_charging(hour_avg, state, is_capacity_peak):
                     logging.info("Wake up failed - will retry next cycle")
                     return state
             elif is_charging:
-                # Always wake to stop charging during spike - no hourly restriction
+                # Always wake to stop charging during spike
                 if hour_avg > TESLA_STOP_PRICE:
                     logging.info(f"Tesla charging but price spiked to {hour_avg:.2f}c - waking to stop")
                     if wake_tesla():
@@ -543,27 +520,6 @@ def handle_tesla_charging(hour_avg, state, is_capacity_peak):
                     else:
                         logging.info("Wake up failed - will retry next cycle")
                         return state
-                else:
-                    logging.info("Tesla charging, price ok - leaving asleep")
-                    return state
-            else:
-                logging.info(f"Tesla asleep - price {hour_avg:.2f}c not cheap enough to wake")
-                return state
-                    tesla   = get_tesla_state()
-                    battery = tesla["battery"]
-                    if battery is None:
-                        logging.info("Tesla still waking up - will retry next cycle")
-                        return state
-            elif is_charging:
-                # Car is charging but sensors unknown - wake to check for spikes
-                if hour_avg > TESLA_STOP_PRICE:
-                    logging.info(f"Tesla charging but price spiked to {hour_avg:.2f}c - waking to stop")
-                    if wake_tesla():
-                        tesla   = get_tesla_state()
-                        battery = tesla["battery"]
-                        if battery is None:
-                            logging.info("Tesla still waking - will retry next cycle")
-                            return state
                 else:
                     logging.info("Tesla charging, price ok - leaving asleep")
                     return state
@@ -603,11 +559,11 @@ def handle_tesla_charging(hour_avg, state, is_capacity_peak):
                 state["tesla_paused"] = True
             return state
 
-        # Protected hours noon-7 PM
+        # Protected hours noon-7PM
         if in_protect_hours:
             if hour_avg <= TESLA_CHARGE_PRICE:
                 if not is_charging:
-                    reason = f"Price {hour_avg:.2f}c - too cheap to ignore during peak hours"
+                    reason = f"Price {hour_avg:.2f}c - too cheap to ignore"
                     set_tesla_charging(True, reason)
                     state.setdefault("tesla_events", []).append({
                         "time": datetime.now().strftime("%I:%M %p"),
@@ -637,7 +593,7 @@ def handle_tesla_charging(hour_avg, state, is_capacity_peak):
 
         elif hour_avg <= TESLA_RESUME_PRICE:
             if not is_charging and battery < TESLA_MAX_BATTERY:
-                reason = f"Price {hour_avg:.2f}c dropped below resume threshold {TESLA_RESUME_PRICE}c"
+                reason = f"Price {hour_avg:.2f}c dropped below resume threshold"
                 set_tesla_charging(True, reason)
                 state.setdefault("tesla_events", []).append({
                     "time": datetime.now().strftime("%I:%M %p"),
@@ -659,7 +615,7 @@ def handle_tesla_charging(hour_avg, state, is_capacity_peak):
 
     return state
 
-# ── EMAIL ─────────────────────────────────────────────────────────────────────
+# -- EMAIL --------------------------------------------------------------------
 
 def send_email(subject, body):
     try:
@@ -691,33 +647,33 @@ def send_morning_report(state):
         overnight_events = [e for e in events if _is_overnight_time(e["time"])]
         daytime_events   = [e for e in events if not _is_overnight_time(e["time"])]
 
-        overnight_section = "\nOVERNIGHT EVENTS:\nNone\n"
+        o_section = "\nOVERNIGHT EVENTS:\nNone\n"
         if overnight_events:
-            overnight_section = "\nOVERNIGHT EVENTS:\n"
+            o_section = "\nOVERNIGHT EVENTS:\n"
             for e in overnight_events:
-                overnight_section += f"  {e['time']} - Charging {e['action']}: {e['reason']}\n"
+                o_section += f"  {e['time']} - Charging {e['action']}: {e['reason']}\n"
 
-        daytime_section = "\nDAYTIME INTERACTIONS:\nNone\n"
+        d_section = "\nDAYTIME INTERACTIONS:\nNone\n"
         if daytime_events:
-            daytime_section = "\nDAYTIME INTERACTIONS:\n"
+            d_section = "\nDAYTIME INTERACTIONS:\n"
             for e in daytime_events:
-                daytime_section += f"  {e['time']} - Charging {e['action']}: {e['reason']}\n"
+                d_section += f"  {e['time']} - Charging {e['action']}: {e['reason']}\n"
 
         send_email(
             f"Daily Charging Report - {datetime.now().strftime('%B %d')}",
-            f"OVERNIGHT CHARGING (12:00 AM - 6:00 AM):\n"
-            f"Average price paid: {avg_price:.2f}c/kWh\n"
-            f"vs flat rate:       {FLAT_RATE}c/kWh\n"
-            f"Potential savings:  ${savings:.2f}\n"
-            f"{overnight_section}"
+            f"OVERNIGHT (12:00 AM - 6:00 AM):\n"
+            f"Average price: {avg_price:.2f}c/kWh\n"
+            f"vs flat rate:  {FLAT_RATE}c/kWh\n"
+            f"Savings:       ${savings:.2f}\n"
+            f"{o_section}"
             f"\nBATTERY:\n"
-            f"Started night at: {start_batt:.0f}%\n"
-            f"Current level:    {battery_now:.0f}%\n"
-            f"Charged:          {pct_charged:.0f}% ({kwh_charged:.1f} kWh est.)\n"
-            f"{daytime_section}"
-            f"\nTONIGHT'S PREDICTION:\n"
+            f"Started: {start_batt:.0f}%\n"
+            f"Current: {battery_now:.0f}%\n"
+            f"Charged: {pct_charged:.0f}% ({kwh_charged:.1f} kWh est.)\n"
+            f"{d_section}"
+            f"\nTONIGHT:\n"
             f"{pred_note}\n"
-            f"Estimated price: {f'{pred_price:.1f}c' if pred_price else 'Unknown'}"
+            f"Est. price: {f'{pred_price:.1f}c' if pred_price else 'Unknown'}"
         )
         state["overnight_start_battery"] = None
         state["overnight_prices"]        = []
@@ -728,16 +684,13 @@ def send_morning_report(state):
 
 def _is_overnight_time(time_str):
     try:
-        parts = time_str.split(":")
-        hour  = int(parts[0])
-        ampm  = time_str.split(" ")[1] if " " in time_str else "AM"
-        if ampm == "AM" and hour != 12:
-            return hour < 6
-        return False
+        hour = int(time_str.split(":")[0])
+        ampm = time_str.split(" ")[1] if " " in time_str else "AM"
+        return ampm == "AM" and hour != 12 and hour < 6
     except:
         return False
 
-# ── MAIN ──────────────────────────────────────────────────────────────────────
+# -- MAIN ---------------------------------------------------------------------
 
 def main():
     now          = datetime.now()
@@ -750,14 +703,13 @@ def main():
         save_state(state)
         return
 
-    tier = price_tier(hour_avg)
     daily = state.setdefault("daily_hours", {})
     daily[str(current_hour)] = hour_avg
     state["daily_hours"] = daily
 
     try:
-        weather_now    = get_weather()
-        current_temp_c = weather_now["hourly"]["temperature_2m"][0] if weather_now else 25.0
+        w              = get_weather()
+        current_temp_c = w["hourly"]["temperature_2m"][0] if w else 25.0
     except:
         current_temp_c = 25.0
 
@@ -775,9 +727,9 @@ def main():
         if not state.get("low_alert_sent"):
             send_email(
                 f"Low Price Alert: {hour_avg:.2f}c/kWh",
-                f"Current ComEd price is {hour_avg:.2f}c/kWh\n"
-                f"Great time to run dishwasher, laundry!\n\n"
-                f"5-minute price: {price_5min:.2f}c"
+                f"Current price: {hour_avg:.2f}c/kWh\n"
+                f"Great time to run dishwasher, laundry!\n"
+                f"5-min price: {price_5min:.2f}c"
             )
             state["low_alert_sent"] = True
     else:
@@ -797,26 +749,19 @@ def main():
             precool, forecast = should_precool()
             pred_price, pred_note = get_tonight_price_prediction()
             if forecast:
-                action = ""
-                if forecast["very_expensive"]:
-                    action = "Pre-cooling to 22C tonight!"
-                elif forecast["expensive"]:
-                    action = "Pre-cooling slightly tonight."
-                else:
-                    action = "Normal prices expected."
-                capacity_note = ""
-                if forecast.get("capacity_day"):
-                    capacity_note = "\nWARNING: CAPACITY DAY TOMORROW - Avoid heavy usage 2-6 PM!"
+                if forecast["very_expensive"]:   action = "Pre-cooling to 22C tonight!"
+                elif forecast["expensive"]:      action = "Pre-cooling slightly tonight."
+                else:                            action = "Normal prices expected."
+                cap_note = "\nWARNING: CAPACITY DAY TOMORROW - Avoid heavy usage 2-6 PM!" if forecast.get("capacity_day") else ""
                 send_email(
                     f"Evening Forecast - {(now + timedelta(days=1)).strftime('%B %d')}",
-                    f"TOMORROW'S WEATHER:\n"
-                    f"Forecast high:    {forecast['max_temp']:.1f}C\n"
-                    f"Afternoon peak:   {forecast['max_afternoon']:.1f}C\n"
-                    f"Price prediction: {'Expensive afternoon expected' if forecast['expensive'] else 'Normal prices expected'}\n"
-                    f"{action}{capacity_note}\n\n"
-                    f"TONIGHT'S CHARGING:\n"
+                    f"TOMORROW:\n"
+                    f"High: {forecast['max_temp']:.1f}C | Afternoon: {forecast['max_afternoon']:.1f}C\n"
+                    f"{'Expensive afternoon expected' if forecast['expensive'] else 'Normal prices expected'}\n"
+                    f"{action}{cap_note}\n\n"
+                    f"TONIGHT CHARGING:\n"
                     f"{pred_note}\n"
-                    f"Estimated price: {f'{pred_price:.1f}c' if pred_price else 'Unknown'}"
+                    f"Est. price: {f'{pred_price:.1f}c' if pred_price else 'Unknown'}"
                 )
             state["forecast_sent"] = True
     elif current_hour == 18:
@@ -825,45 +770,40 @@ def main():
     # 10:30 PM daily report
     if current_hour == 22 and now.minute >= 30:
         if not state.get("daily_report_sent"):
-            hours_data = [v for v in daily.values() if isinstance(v, float)]
+            hours_data  = [v for v in daily.values() if isinstance(v, float)]
             if hours_data:
                 avg_today   = sum(hours_data) / len(hours_data)
                 hours_beat  = sum(1 for h in hours_data if h < FLAT_RATE)
-                kwh_used    = len(hours_data) * 1.5
-                savings     = (FLAT_RATE - avg_today) / 100 * kwh_used
+                savings     = (FLAT_RATE - avg_today) / 100 * (len(hours_data) * 1.5)
                 events      = state.get("tesla_events", [])
                 n_paused    = sum(1 for e in events if e["action"] == "stopped")
                 n_resumed   = sum(1 for e in events if e["action"] == "started")
-                peaks_today = sum(
-                    1 for k in state.get("capacity_peaks", {})
-                    if k.startswith(f"peak_{now.strftime('%Y%m%d')}")
-                )
+                peaks_today = sum(1 for k in state.get("capacity_peaks", {}) if k.startswith(f"peak_{now.strftime('%Y%m%d')}"))
                 try:
                     tesla      = get_tesla_state()
-                    tesla_line = f"Current battery: {tesla['battery']:.0f}%\n" if tesla["plugged_in"] and tesla["battery"] else ""
+                    tesla_line = f"Battery: {tesla['battery']:.0f}%\n" if tesla["plugged_in"] and tesla["battery"] else ""
                 except:
                     tesla_line = ""
                 send_email(
                     f"Daily Energy Report - {now.strftime('%B %d')}",
                     f"HOUSE:\n"
-                    f"Average supply price: {avg_today:.2f}c/kWh\n"
-                    f"Old flat rate:        {FLAT_RATE}c/kWh\n"
-                    f"Beat flat rate:       {hours_beat}/{len(hours_data)} hours\n"
-                    f"Estimated savings:    ${savings:.2f}\n\n"
+                    f"Avg price:    {avg_today:.2f}c/kWh\n"
+                    f"Flat rate:    {FLAT_RATE}c/kWh\n"
+                    f"Beat rate:    {hours_beat}/{len(hours_data)} hours\n"
+                    f"Est savings:  ${savings:.2f}\n\n"
                     f"TESLA:\n"
                     f"{tesla_line}"
-                    f"Charging paused:  {n_paused} time(s)\n"
-                    f"Charging resumed: {n_resumed} time(s)\n"
-                    f"Capacity peaks:   {peaks_today} detected today\n\n"
-                    f"TOMORROW:\n"
-                    f"Check your 5 PM forecast email for details."
+                    f"Paused:  {n_paused} time(s)\n"
+                    f"Resumed: {n_resumed} time(s)\n"
+                    f"Cap peaks today: {peaks_today}\n\n"
+                    f"See 5 PM email for tomorrow's forecast."
                 )
             state["daily_report_sent"] = True
     elif current_hour == 23:
         state["daily_report_sent"] = False
         state["daily_hours"]       = {}
 
-    # Pre-cool overnight if tomorrow expensive and NOT a capacity day
+    # Pre-cool overnight
     precool, forecast = should_precool()
     if precool and is_sleep_time() and not is_capacity_day:
         target_cool = 20.0 if forecast["very_expensive"] else 21.0
@@ -897,8 +837,7 @@ def main():
             sleep        = is_sleep_time()
             target_cool  = get_dynamic_cool(hour_avg, sleep)
             current_cool = state.get("last_cool_setpoint", 23.5)
-            if (state.get("last_change_hour") != current_hour and
-                    abs(current_cool - target_cool) > 0.1):
+            if state.get("last_change_hour") != current_hour and abs(current_cool - target_cool) > 0.1:
                 new_cool = smooth_setpoint(current_cool, target_cool)
                 set_temperature(DYNAMIC_HEAT, new_cool)
                 state["last_cool_setpoint"] = new_cool
