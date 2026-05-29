@@ -151,13 +151,13 @@ def get_comed_price():
         try:
             r = requests.get(
                 "https://hourlypricing.comed.com/api?type=5minutefeed",
-                timeout=10
+                timeout=30
             )
             r.raise_for_status()
             current = float(r.json()[0]["price"])
             r2 = requests.get(
                 "https://hourlypricing.comed.com/api?type=currenthouraverage",
-                timeout=10
+                timeout=30
             )
             r2.raise_for_status()
             avg = float(r2.json()[0]["price"])
@@ -190,7 +190,7 @@ def get_weather():
                 "&temperature_unit=celsius"
                 "&timezone=America%2FChicago"
                 "&forecast_days=2",
-                timeout=10
+                timeout=30
             )
             r.raise_for_status()
             return r.json()
@@ -285,7 +285,7 @@ def set_temperature(heat_c, cool_c):
         try:
             r = requests.post(
                 f"{HA_URL}/api/services/climate/set_temperature",
-                headers=headers, json=payload, timeout=10
+                headers=headers, json=payload, timeout=30
             )
             r.raise_for_status()
             logging.info(f"Set temps -> heat: {heat_c}C ({heat_f}F), cool: {cool_c}C ({cool_f}F)")
@@ -463,7 +463,7 @@ def set_tesla_charging(enable, reason=""):
         f"{HA_URL}/api/services/switch/{service}",
         headers=headers,
         json={"entity_id": TESLA_CHARGE_SWITCH},
-        timeout=10
+        timeout=30
     )
     r.raise_for_status()
     action = "Started" if enable else "Stopped"
