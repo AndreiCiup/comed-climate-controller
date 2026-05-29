@@ -23,7 +23,7 @@ CLIMATE_ENTITY  = "climate.my_ecobee"
 TESLA_CHARGE_SWITCH    = "switch.lady_t_charge"
 TESLA_CHARGING_SENSOR  = "sensor.lady_t_charging"
 TESLA_BATTERY_SENSOR   = "sensor.lady_t_battery_level"
-TESLA_CABLE_SENSOR     = "binary_sensor.lady_t_charge_cable"
+TESLA_CABLE_SENSOR     = "lock.lady_t_charge_cable_lock"
 TESLA_WAKE_BUTTON      = "button.lady_t_wake"
 WALL_CONNECTOR_POWER   = "sensor.wall_connector_power"
 TESLA_MAX_BATTERY      = 85.0
@@ -374,7 +374,7 @@ def get_tesla_state():
     )
     r.raise_for_status()
     cable_state = r.json()["state"]
-    plugged_in  = cable_state in ["on", "unknown"]
+    plugged_in  = cable_state in ["locked", "unknown"]
     logging.info(f"Cable state: {cable_state}")
 
     if not plugged_in:
