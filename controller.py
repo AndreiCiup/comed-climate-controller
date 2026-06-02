@@ -23,15 +23,16 @@ CLIMATE_ENTITY  = "climate.my_ecobee"
 TESLA_CHARGE_SWITCH    = "switch.lady_t_charge"
 TESLA_CHARGING_SENSOR  = "sensor.lady_t_charging"
 TESLA_BATTERY_SENSOR   = "sensor.lady_t_battery_level"
-TESLA_CABLE_SENSOR     = "lock.lady_t_charge_cable_lock"
+TESLA_LOCATION         = "device_tracker.lady_t_location"
 TESLA_WAKE_BUTTON      = "button.lady_t_wake"
 WALL_CONNECTOR_POWER   = "sensor.wall_connector_power"
 TESLA_MAX_BATTERY      = 85.0
 TESLA_CHARGE_PRICE     = 3.0
-TESLA_STOP_PRICE       = 8.0
-TESLA_RESUME_PRICE     = 5.0
+TESLA_STOP_PRICE_DAY   = 3.5
+TESLA_STOP_PRICE_NIGHT = 6.0
 TESLA_PROTECT_START    = 12
 TESLA_PROTECT_END      = 19
+TESLA_KWH_PER_PERCENT  = 0.83  # Model 3 LR, 290mi range
 
 # Gmail
 GMAIL_USER    = "climatecontrol.pi@gmail.com"
@@ -60,6 +61,10 @@ CAPACITY_TEMP_C   = 30.0
 CAPACITY_PRICE    = 10.0
 CAPACITY_DAY_TEMP = 30.0
 
+# Location - Aurora IL 60504
+LATITUDE  = 41.7421
+LONGITUDE = -88.2456
+
 # Dynamic thermostat scale daytime centered on 23.5C
 DYNAMIC_COOL = [
     (-99,  1.0, 22.0),
@@ -80,13 +85,23 @@ DYNAMIC_COOL_SLEEP = [
     (12.0, 99,   23.0),
 ]
 
-DYNAMIC_HEAT = 19.5
+DYNAMIC_HEAT           = 19.5
+THERMOSTAT_UPDATE_MINS = 20
 
 logging.basicConfig(
     filename="/config/comed_ecobee/controller.log",
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(message)s"
 )
+
+# -- HVAC SAVINGS -------------------------------------------------------------
+
+def get_hvac_kwh_per_hour(outdoor_temp_c):
+    """Trane 2.5 ton unit, 2000sqft home in Aurora IL."""
+    if outdoor_temp_c > 32:    return 2.39
+    elif outdoor_temp_c > 28:  return 1.88
+    elif outdoor_temp_c > 22:  return 1.20
+    else:                      return 0.34
 
 # -- STATE --------------------------------------------------------------------
 
@@ -96,9 +111,8 @@ def load_state():
             return json.load(f)
     except:
         return {
-            "last_tier":               "normal",
-            "last_change_hour":        -1,
             "last_cool_setpoint":      23.5,
+            "last_thermostat_update":  0,
             "low_alert_sent":          False,
             "daily_hours":             {},
             "capacity_peaks":          {},
@@ -144,6 +158,9 @@ def smooth_setpoint(current, target, max_step=1.0):
         return max(current - max_step, target)
     return current
 
+def minutes_since(timestamp):
+    return (time.time() - timestamp) / 60
+
 # -- PRICE --------------------------------------------------------------------
 
 def get_comed_price():
@@ -165,18 +182,18 @@ def get_comed_price():
             return current, avg
         except Exception as e:
             if attempt == 0:
-                logging.warning(f"Price fetch failed, retrying in 30s: {e}")
+                logging.warning(f"Price fetch failed, retrying: {e}")
                 time.sleep(30)
             else:
                 logging.error(f"Price fetch failed twice: {e}")
                 raise
 
 def price_tier(price):
-    if price < PRICE_FREE:   return "free"
-    elif price < PRICE_LOW:  return "low"
+    if price < PRICE_FREE:     return "free"
+    elif price < PRICE_LOW:    return "low"
     elif price < PRICE_NORMAL: return "normal"
-    elif price < PRICE_HIGH: return "high"
-    else:                    return "peak"
+    elif price < PRICE_HIGH:   return "high"
+    else:                      return "peak"
 
 # -- WEATHER ------------------------------------------------------------------
 
@@ -184,12 +201,12 @@ def get_weather():
     for attempt in range(2):
         try:
             r = requests.get(
-                "https://api.open-meteo.com/v1/forecast"
-                "?latitude=41.85&longitude=-87.65"
-                "&hourly=temperature_2m"
-                "&temperature_unit=celsius"
-                "&timezone=America%2FChicago"
-                "&forecast_days=2",
+                f"https://api.open-meteo.com/v1/forecast"
+                f"?latitude={LATITUDE}&longitude={LONGITUDE}"
+                f"&hourly=temperature_2m"
+                f"&temperature_unit=celsius"
+                f"&timezone=America%2FChicago"
+                f"&forecast_days=2",
                 timeout=30
             )
             r.raise_for_status()
@@ -312,7 +329,7 @@ def check_capacity_day(state):
                 f"Tomorrow afternoon forecast: {f['max_afternoon']:.1f}C\n\n"
                 f"System will:\n"
                 f"- Hold thermostat at 23.5C all day\n"
-                f"- Stop Tesla charging noon-7PM\n"
+                f"- Stop Tesla charging (no exceptions)\n"
                 f"- No pre-cooling below comfort baseline\n\n"
                 f"Avoid heavy appliance use 2-6 PM tomorrow."
             )
@@ -344,7 +361,7 @@ def handle_capacity_peak(state, hour_avg, current_temp):
         "price": hour_avg, "temp": current_temp,
         "time":  datetime.now().strftime("%Y-%m-%d %H:%M")
     }
-    this_month = datetime.now().strftime("%Y%m")
+    this_month  = datetime.now().strftime("%Y%m")
     peaks_month = sum(1 for k in state["capacity_peaks"] if k.startswith(f"peak_{this_month}"))
     state.setdefault("tesla_events", []).append({
         "time":   datetime.now().strftime("%I:%M %p"),
@@ -368,26 +385,35 @@ def handle_capacity_peak(state, hour_avg, current_temp):
 
 def get_tesla_state():
     headers = {"Authorization": f"Bearer {HA_TOKEN}"}
-    r = requests.get(
-        f"{HA_URL}/api/states/{TESLA_CABLE_SENSOR}",
+
+    # Check location first
+    r_loc = requests.get(
+        f"{HA_URL}/api/states/{TESLA_LOCATION}",
         headers=headers, timeout=30
     )
-    r.raise_for_status()
-    cable_state = r.json()["state"]
-    plugged_in  = cable_state in ["locked", "unknown"]
-    logging.info(f"Cable state: {cable_state}")
+    r_loc.raise_for_status()
+    location = r_loc.json()["state"]
+
+    # Check charging status
+    r_chg = requests.get(
+        f"{HA_URL}/api/states/{TESLA_CHARGING_SENSOR}",
+        headers=headers, timeout=30
+    )
+    r_chg.raise_for_status()
+    charging_state = r_chg.json()["state"]
+
+    plugged_in = location == "home" and charging_state.lower() != "disconnected"
+    logging.info(f"Location: {location} | Charging: {charging_state} | Plugged in: {plugged_in}")
 
     if not plugged_in:
         return {
             "plugged_in": False,
-            "charging":   "Disconnected",
+            "charging":   charging_state,
             "battery":    None,
             "switch":     "off",
             "wall_power": 0.0
         }
 
-    r1 = requests.get(f"{HA_URL}/api/states/{TESLA_CHARGING_SENSOR}", headers=headers, timeout=30)
-    r1.raise_for_status()
     r2 = requests.get(f"{HA_URL}/api/states/{TESLA_BATTERY_SENSOR}", headers=headers, timeout=30)
     r2.raise_for_status()
     r3 = requests.get(f"{HA_URL}/api/states/{TESLA_CHARGE_SWITCH}", headers=headers, timeout=30)
@@ -406,7 +432,7 @@ def get_tesla_state():
 
     return {
         "plugged_in": True,
-        "charging":   r1.json()["state"],
+        "charging":   charging_state,
         "battery":    battery_val,
         "switch":     r3.json()["state"],
         "wall_power": wall_power
@@ -439,18 +465,14 @@ def should_check_tesla(hour_avg, state):
     last_avg        = state.get("last_hour_avg", 0.0)
     last_check_hour = state.get("tesla_last_check_hour", -1)
 
-    price_crossed = (
-        (last_avg <= TESLA_STOP_PRICE   < hour_avg) or
-        (last_avg >= TESLA_STOP_PRICE   > hour_avg) or
-        (last_avg <= TESLA_RESUME_PRICE < hour_avg) or
-        (last_avg >= TESLA_RESUME_PRICE > hour_avg) or
-        (last_avg <= TESLA_CHARGE_PRICE < hour_avg) or
-        (last_avg >= TESLA_CHARGE_PRICE > hour_avg)
-    )
-    if price_crossed:                                    return True
-    if 0 <= hour < 6 and minute % 30 == 0:              return True
+    thresholds = [TESLA_CHARGE_PRICE, TESLA_STOP_PRICE_DAY, TESLA_STOP_PRICE_NIGHT]
+    for t in thresholds:
+        if (last_avg <= t < hour_avg) or (last_avg >= t > hour_avg):
+            return True
+
+    if 0 <= hour < 6 and minute % 30 == 0:                return True
     if state.get("tesla_plugged_in") and minute % 30 == 0: return True
-    if last_check_hour != hour:                          return True
+    if last_check_hour != hour:                            return True
     return False
 
 def set_tesla_charging(enable, reason=""):
@@ -469,7 +491,7 @@ def set_tesla_charging(enable, reason=""):
     action = "Started" if enable else "Stopped"
     logging.info(f"{action} Tesla charging - {reason}" if reason else f"{action} Tesla charging")
 
-def handle_tesla_charging(hour_avg, state, is_capacity_peak):
+def handle_tesla_charging(hour_avg, state, is_capacity_peak, is_capacity_day):
     try:
         if not should_check_tesla(hour_avg, state):
             return state
@@ -491,8 +513,7 @@ def handle_tesla_charging(hour_avg, state, is_capacity_peak):
 
         # Handle sleeping Tesla
         if battery is None:
-            if hour_avg <= TESLA_CHARGE_PRICE:
-                # Only wake to start charging once per hour
+            if hour_avg <= TESLA_CHARGE_PRICE and not is_capacity_day and not is_capacity_peak:
                 if state.get("tesla_wake_hour") == now_hour:
                     logging.info("Already attempted wake this hour - skipping")
                     return state
@@ -508,9 +529,10 @@ def handle_tesla_charging(hour_avg, state, is_capacity_peak):
                     logging.info("Wake up failed - will retry next cycle")
                     return state
             elif is_charging:
-                # Always wake to stop charging during spike
-                if hour_avg > TESLA_STOP_PRICE:
-                    logging.info(f"Tesla charging but price spiked to {hour_avg:.2f}c - waking to stop")
+                in_night   = is_overnight_charging_window()
+                stop_price = TESLA_STOP_PRICE_NIGHT if in_night else TESLA_STOP_PRICE_DAY
+                if hour_avg > stop_price:
+                    logging.info(f"Tesla charging but price {hour_avg:.2f}c > {stop_price}c - waking to stop")
                     if wake_tesla():
                         tesla   = get_tesla_state()
                         battery = tesla["battery"]
@@ -545,12 +567,14 @@ def handle_tesla_charging(hour_avg, state, is_capacity_peak):
                 })
             return state
 
+        in_night         = is_overnight_charging_window()
         in_protect_hours = TESLA_PROTECT_START <= now_hour < TESLA_PROTECT_END
+        stop_price       = TESLA_STOP_PRICE_NIGHT if in_night else TESLA_STOP_PRICE_DAY
 
-        # Capacity peak - stop no exceptions
-        if is_capacity_peak:
+        # Capacity peak or day - stop no exceptions
+        if is_capacity_peak or is_capacity_day:
             if is_charging:
-                reason = f"Capacity peak hour - price {hour_avg:.2f}c"
+                reason = f"Capacity {'peak' if is_capacity_peak else 'day'} - price {hour_avg:.2f}c"
                 set_tesla_charging(False, reason)
                 state.setdefault("tesla_events", []).append({
                     "time": datetime.now().strftime("%I:%M %p"),
@@ -559,56 +583,52 @@ def handle_tesla_charging(hour_avg, state, is_capacity_peak):
                 state["tesla_paused"] = True
             return state
 
-        # Protected hours noon-7PM
-        if in_protect_hours:
-            if hour_avg <= TESLA_CHARGE_PRICE:
-                if not is_charging:
-                    reason = f"Price {hour_avg:.2f}c - too cheap to ignore"
-                    set_tesla_charging(True, reason)
-                    state.setdefault("tesla_events", []).append({
-                        "time": datetime.now().strftime("%I:%M %p"),
-                        "action": "started", "reason": reason, "price": hour_avg
-                    })
-            else:
-                if is_charging:
-                    reason = f"Protected hours noon-7PM - price {hour_avg:.2f}c"
-                    set_tesla_charging(False, reason)
-                    state.setdefault("tesla_events", []).append({
-                        "time": datetime.now().strftime("%I:%M %p"),
-                        "action": "stopped", "reason": reason, "price": hour_avg
-                    })
-                    state["tesla_paused"] = True
-            return state
-
-        # Outside protected hours
-        if hour_avg > TESLA_STOP_PRICE:
-            if is_charging:
-                reason = f"Price spike {hour_avg:.2f}c > {TESLA_STOP_PRICE}c"
-                set_tesla_charging(False, reason)
-                state.setdefault("tesla_events", []).append({
-                    "time": datetime.now().strftime("%I:%M %p"),
-                    "action": "stopped", "reason": reason, "price": hour_avg
-                })
-                state["tesla_paused"] = True
-
-        elif hour_avg <= TESLA_RESUME_PRICE:
+        # Price < 3c anywhere = always charge
+        if hour_avg <= TESLA_CHARGE_PRICE:
             if not is_charging and battery < TESLA_MAX_BATTERY:
-                reason = f"Price {hour_avg:.2f}c dropped below resume threshold"
+                reason = f"Cheap price {hour_avg:.2f}c - always charge below {TESLA_CHARGE_PRICE}c"
                 set_tesla_charging(True, reason)
                 state.setdefault("tesla_events", []).append({
                     "time": datetime.now().strftime("%I:%M %p"),
                     "action": "started", "reason": reason, "price": hour_avg
                 })
                 state["tesla_paused"] = False
+            return state
 
-        elif hour_avg <= TESLA_CHARGE_PRICE:
+        # Price > stop threshold - stop charging
+        if hour_avg > stop_price:
+            if is_charging:
+                reason = f"Price {hour_avg:.2f}c > stop threshold {stop_price}c"
+                set_tesla_charging(False, reason)
+                state.setdefault("tesla_events", []).append({
+                    "time": datetime.now().strftime("%I:%M %p"),
+                    "action": "stopped", "reason": reason, "price": hour_avg
+                })
+                state["tesla_paused"] = True
+            return state
+
+        # Protected hours noon-7PM and price > 3c - stop
+        if in_protect_hours and hour_avg > TESLA_CHARGE_PRICE:
+            if is_charging:
+                reason = f"Protected hours noon-7PM - price {hour_avg:.2f}c"
+                set_tesla_charging(False, reason)
+                state.setdefault("tesla_events", []).append({
+                    "time": datetime.now().strftime("%I:%M %p"),
+                    "action": "stopped", "reason": reason, "price": hour_avg
+                })
+                state["tesla_paused"] = True
+            return state
+
+        # Overnight window and price <= 6c - keep charging
+        if in_night and hour_avg <= TESLA_STOP_PRICE_NIGHT:
             if not is_charging and battery < TESLA_MAX_BATTERY:
-                reason = f"Cheap price {hour_avg:.2f}c"
+                reason = f"Overnight window - price {hour_avg:.2f}c"
                 set_tesla_charging(True, reason)
                 state.setdefault("tesla_events", []).append({
                     "time": datetime.now().strftime("%I:%M %p"),
                     "action": "started", "reason": reason, "price": hour_avg
                 })
+                state["tesla_paused"] = False
 
     except Exception as e:
         logging.error(f"Tesla charging error: {e}")
@@ -640,7 +660,7 @@ def send_morning_report(state):
         o_prices    = state.get("overnight_prices", [])
         avg_price   = sum(o_prices) / len(o_prices) if o_prices else 0
         pct_charged = max(0, battery_now - start_batt)
-        kwh_charged = pct_charged * 0.25
+        kwh_charged = pct_charged * TESLA_KWH_PER_PERCENT
         savings     = (FLAT_RATE - avg_price) / 100 * kwh_charged
         pred_price, pred_note = get_tonight_price_prediction()
         events           = state.get("tesla_events", [])
@@ -720,7 +740,7 @@ def main():
     if is_capacity_peak:
         state = handle_capacity_peak(state, hour_avg, current_temp_c)
 
-    state = handle_tesla_charging(hour_avg, state, is_capacity_peak)
+    state = handle_tesla_charging(hour_avg, state, is_capacity_peak, is_capacity_day)
 
     # Low price alert
     if hour_avg <= PRICE_LOW:
@@ -770,11 +790,12 @@ def main():
     # 10:30 PM daily report
     if current_hour == 22 and now.minute >= 30:
         if not state.get("daily_report_sent"):
-            hours_data  = [v for v in daily.values() if isinstance(v, float)]
+            hours_data = [v for v in daily.values() if isinstance(v, float)]
             if hours_data:
                 avg_today   = sum(hours_data) / len(hours_data)
                 hours_beat  = sum(1 for h in hours_data if h < FLAT_RATE)
-                savings     = (FLAT_RATE - avg_today) / 100 * (len(hours_data) * 1.5)
+                kwh_per_hr  = get_hvac_kwh_per_hour(current_temp_c)
+                savings     = (FLAT_RATE - avg_today) / 100 * (len(hours_data) * kwh_per_hr)
                 events      = state.get("tesla_events", [])
                 n_paused    = sum(1 for e in events if e["action"] == "stopped")
                 n_resumed   = sum(1 for e in events if e["action"] == "started")
@@ -787,15 +808,16 @@ def main():
                 send_email(
                     f"Daily Energy Report - {now.strftime('%B %d')}",
                     f"HOUSE:\n"
-                    f"Avg price:    {avg_today:.2f}c/kWh\n"
-                    f"Flat rate:    {FLAT_RATE}c/kWh\n"
-                    f"Beat rate:    {hours_beat}/{len(hours_data)} hours\n"
-                    f"Est savings:  ${savings:.2f}\n\n"
+                    f"Avg price:      {avg_today:.2f}c/kWh\n"
+                    f"Flat rate:      {FLAT_RATE}c/kWh\n"
+                    f"Beat rate:      {hours_beat}/{len(hours_data)} hours\n"
+                    f"Est HVAC use:   {kwh_per_hr:.2f} kWh/hr\n"
+                    f"Est savings:    ${savings:.2f}\n\n"
                     f"TESLA:\n"
                     f"{tesla_line}"
-                    f"Paused:  {n_paused} time(s)\n"
-                    f"Resumed: {n_resumed} time(s)\n"
-                    f"Cap peaks today: {peaks_today}\n\n"
+                    f"Paused:         {n_paused} time(s)\n"
+                    f"Resumed:        {n_resumed} time(s)\n"
+                    f"Cap peaks today:{peaks_today}\n\n"
                     f"See 5 PM email for tomorrow's forecast."
                 )
             state["daily_report_sent"] = True
@@ -809,39 +831,44 @@ def main():
         target_cool = 20.0 if forecast["very_expensive"] else 21.0
         set_temperature(DYNAMIC_HEAT, target_cool)
         logging.info(f"Pre-cooling for tomorrow: {target_cool}C")
-        state["last_cool_setpoint"] = target_cool
-        state["last_change_hour"]   = current_hour
+        state["last_cool_setpoint"]     = target_cool
+        state["last_thermostat_update"] = time.time()
         save_state(state)
         return
 
-    # Dynamic thermostat
+    # Dynamic thermostat - update every 20 minutes
     try:
         ha_state = get_ha_state()
         preset   = ha_state["attributes"].get("preset_mode", "")
+        mins_since_update = minutes_since(state.get("last_thermostat_update", 0))
 
         if "away" in preset.lower():
-            set_temperature(18.0, min(26.0, CAT_MAX_C))
-            logging.info("Away mode active")
+            if mins_since_update >= THERMOSTAT_UPDATE_MINS:
+                set_temperature(18.0, min(26.0, CAT_MAX_C))
+                state["last_thermostat_update"] = time.time()
+                logging.info("Away mode active")
 
         elif is_capacity_peak or is_capacity_day:
             target_cool  = 23.5
             current_cool = state.get("last_cool_setpoint", 23.5)
-            if abs(current_cool - target_cool) > 0.1 and state.get("last_change_hour") != current_hour:
+            if abs(current_cool - target_cool) > 0.1 and mins_since_update >= THERMOSTAT_UPDATE_MINS:
                 new_cool = smooth_setpoint(current_cool, target_cool)
                 set_temperature(DYNAMIC_HEAT, new_cool)
-                state["last_cool_setpoint"] = new_cool
-                state["last_change_hour"]   = current_hour
+                state["last_cool_setpoint"]     = new_cool
+                state["last_thermostat_update"] = time.time()
                 logging.info(f"Capacity mode - holding baseline: {new_cool}C")
 
         else:
             sleep        = is_sleep_time()
             target_cool  = get_dynamic_cool(hour_avg, sleep)
             current_cool = state.get("last_cool_setpoint", 23.5)
-            if state.get("last_change_hour") != current_hour and abs(current_cool - target_cool) > 0.1:
+            diff         = abs(current_cool - target_cool)
+
+            if diff > 0.1 and mins_since_update >= THERMOSTAT_UPDATE_MINS:
                 new_cool = smooth_setpoint(current_cool, target_cool)
                 set_temperature(DYNAMIC_HEAT, new_cool)
-                state["last_cool_setpoint"] = new_cool
-                state["last_change_hour"]   = current_hour
+                state["last_cool_setpoint"]     = new_cool
+                state["last_thermostat_update"] = time.time()
                 logging.info(f"Dynamic setpoint: {new_cool}C (target: {target_cool}C, price: {hour_avg:.2f}c)")
 
     except Exception as e:
