@@ -7,7 +7,6 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-
         body {
             background: #0f0f0f;
             color: #e0e0e0;
@@ -15,7 +14,6 @@
             min-height: 100vh;
             padding: 16px;
         }
-
         h1 {
             text-align: center;
             font-size: 1rem;
@@ -24,7 +22,6 @@
             letter-spacing: 2px;
             text-transform: uppercase;
         }
-
         .grid {
             display: grid;
             grid-template-columns: 1fr 1fr;
@@ -32,18 +29,13 @@
             max-width: 800px;
             margin: 0 auto;
         }
-
         .card {
             background: #1a1a1a;
             border-radius: 16px;
             padding: 16px;
             border: 1px solid #2a2a2a;
         }
-
-        .card.full {
-            grid-column: 1 / -1;
-        }
-
+        .card.full { grid-column: 1 / -1; }
         .card-title {
             font-size: 0.65rem;
             color: #555;
@@ -51,7 +43,6 @@
             letter-spacing: 1.5px;
             margin-bottom: 10px;
         }
-
         .price-big {
             font-size: 3.8rem;
             font-weight: 700;
@@ -59,7 +50,6 @@
             margin-bottom: 6px;
             transition: color 0.5s;
         }
-
         .tier-badge {
             display: inline-block;
             padding: 3px 10px;
@@ -68,18 +58,10 @@
             font-weight: 600;
             margin-bottom: 8px;
         }
-
-        .subtext {
-            font-size: 0.8rem;
-            color: #888;
-            margin-top: 4px;
-        }
-
+        .subtext { font-size: 0.8rem; color: #888; margin-top: 4px; }
         .green  { color: #00cc66; }
         .yellow { color: #ffaa00; }
         .red    { color: #ff4400; }
-        .grey   { color: #666; }
-
         .stat-row {
             display: flex;
             justify-content: space-between;
@@ -88,11 +70,9 @@
             border-bottom: 1px solid #222;
             font-size: 0.82rem;
         }
-
         .stat-row:last-child { border-bottom: none; }
         .stat-label { color: #666; }
         .stat-value { font-weight: 500; }
-
         .dot {
             display: inline-block;
             width: 7px;
@@ -100,7 +80,50 @@
             border-radius: 50%;
             margin-right: 5px;
         }
-
+        .battery-container { margin-top: 8px; }
+        .battery-label {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.75rem;
+            color: #888;
+            margin-bottom: 4px;
+        }
+        .battery-bar-bg {
+            background: #2a2a2a;
+            border-radius: 6px;
+            height: 10px;
+            overflow: hidden;
+        }
+        .battery-bar-fill {
+            height: 100%;
+            border-radius: 6px;
+            transition: width 0.5s, background 0.5s;
+        }
+        .best-time-box {
+            background: #111a11;
+            border: 1px solid #1a3a1a;
+            border-radius: 10px;
+            padding: 10px 14px;
+            margin-top: 8px;
+            font-size: 0.82rem;
+            color: #88bb88;
+        }
+        .best-time-title {
+            font-size: 0.65rem;
+            color: #555;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 4px;
+        }
+        .weather-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 0;
+            border-bottom: 1px solid #222;
+            font-size: 0.82rem;
+        }
+        .weather-icon { font-size: 1.2rem; }
         .rec-box {
             background: #111f11;
             border: 1px solid #1a3a1a;
@@ -111,23 +134,36 @@
             text-align: center;
             line-height: 1.5;
         }
-
-        .updated {
+        .peak-warning {
+            background: #2a0a0a;
+            border: 1px solid #aa2222;
+            border-radius: 12px;
+            padding: 12px 16px;
+            font-size: 0.85rem;
+            color: #ff8888;
             text-align: center;
-            font-size: 0.65rem;
-            color: #333;
-            margin-top: 14px;
+            display: none;
         }
-
         .savings-big {
             font-size: 2rem;
             font-weight: 700;
             color: #00cc66;
             margin-bottom: 2px;
         }
-
+        .section-title {
+            font-size: 0.7rem;
+            color: #555;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 6px;
+        }
+        .updated {
+            text-align: center;
+            font-size: 0.65rem;
+            color: #333;
+            margin-top: 14px;
+        }
         canvas { max-height: 160px; }
-
         @media (max-width: 420px) {
             .grid { grid-template-columns: 1fr; }
             .card.full { grid-column: 1; }
@@ -141,7 +177,7 @@
 
 <div class="grid">
 
-    <!-- PRICE CARD -->
+    <!-- PRICE -->
     <div class="card">
         <div class="card-title">Current Price</div>
         <div class="price-big" id="price">--</div>
@@ -152,7 +188,26 @@
         </div>
     </div>
 
-    <!-- TODAY SAVINGS -->
+    <!-- WEATHER + BEST TIME -->
+    <div class="card">
+        <div class="card-title">Weather & Best Time</div>
+        <div class="weather-row">
+            <span class="weather-icon" id="weather-icon">--</span>
+            <span>
+                <span id="weather-temp" style="font-size:1.2rem;font-weight:600">--</span>
+                <span style="color:#666;font-size:0.8rem"> outside</span>
+            </span>
+            <span style="color:#666;font-size:0.8rem;margin-left:auto">
+                H:<span id="weather-high">--</span> L:<span id="weather-low">--</span>
+            </span>
+        </div>
+        <div class="best-time-box">
+            <div class="best-time-title">Best time for appliances today</div>
+            <div id="best-time">Calculating...</div>
+        </div>
+    </div>
+
+    <!-- SAVINGS -->
     <div class="card">
         <div class="card-title">Today's Savings</div>
         <div class="savings-big" id="savings-today">$--</div>
@@ -174,7 +229,7 @@
     <div class="card">
         <div class="card-title">Thermostat</div>
         <div class="stat-row">
-            <span class="stat-label">Indoor temp</span>
+            <span class="stat-label">Indoor</span>
             <span class="stat-value" id="indoor">--</span>
         </div>
         <div class="stat-row">
@@ -196,27 +251,47 @@
     </div>
 
     <!-- TESLA -->
-    <div class="card">
+    <div class="card full">
         <div class="card-title">Lady T 🚗</div>
-        <div class="stat-row">
-            <span class="stat-label">Location</span>
-            <span class="stat-value" id="t-location">--</span>
-        </div>
-        <div class="stat-row">
-            <span class="stat-label">Battery</span>
-            <span class="stat-value" id="t-battery">--</span>
-        </div>
-        <div class="stat-row">
-            <span class="stat-label">Charging</span>
-            <span class="stat-value" id="t-charging">--</span>
-        </div>
-        <div class="stat-row">
-            <span class="stat-label">Power</span>
-            <span class="stat-value" id="t-power">--</span>
-        </div>
-        <div class="stat-row">
-            <span class="stat-label">Charge limit</span>
-            <span class="stat-value" id="t-limit">--</span>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+            <div>
+                <div class="stat-row">
+                    <span class="stat-label">Location</span>
+                    <span class="stat-value" id="t-location">--</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">Charging</span>
+                    <span class="stat-value" id="t-charging">--</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">Power</span>
+                    <span class="stat-value" id="t-power">--</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">Charge limit</span>
+                    <span class="stat-value" id="t-limit">--</span>
+                </div>
+            </div>
+            <div>
+                <div class="stat-row">
+                    <span class="stat-label">Battery</span>
+                    <span class="stat-value" id="t-battery">--</span>
+                </div>
+                <div class="battery-container">
+                    <div class="battery-label">
+                        <span>0%</span>
+                        <span id="t-battery-label">--</span>
+                        <span>100%</span>
+                    </div>
+                    <div class="battery-bar-bg">
+                        <div class="battery-bar-fill" id="t-battery-bar"
+                             style="width:0%;background:#00cc66"></div>
+                    </div>
+                    <div style="font-size:0.7rem;color:#555;margin-top:4px;text-align:right">
+                        Target: <span id="t-limit-label">85%</span>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -224,6 +299,72 @@
     <div class="card full">
         <div class="card-title">Today's Price Chart</div>
         <canvas id="chart"></canvas>
+    </div>
+
+    <!-- CAPACITY WARNING -->
+    <div class="peak-warning full" id="peak-warning">
+        ⚠️ Potential Capacity Peak Hour — Avoid dishwasher, laundry, and heavy appliances!
+        Tesla charging has been stopped automatically.
+    </div>
+
+    <!-- ASSISTANT ACTIVITY -->
+    <div class="card full">
+        <div class="card-title">Assistant Activity — Since <span id="start-date">--</span></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+            <div>
+                <div class="section-title">🌡️ Thermostat</div>
+                <div class="stat-row">
+                    <span class="stat-label">↓ Cooled (cheap)</span>
+                    <span class="stat-value green" id="c-cooled">--</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">↑ Raised (expensive)</span>
+                    <span class="stat-value yellow" id="c-raised">--</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">🌙 Pre-cooled</span>
+                    <span class="stat-value" id="c-precool">--</span>
+                </div>
+            </div>
+            <div>
+                <div class="section-title">🚗 Tesla</div>
+                <div class="stat-row">
+                    <span class="stat-label">▶ Started</span>
+                    <span class="stat-value green" id="c-started">--</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">⏹ Stopped (spike)</span>
+                    <span class="stat-value yellow" id="c-spike">--</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">⏹ Stopped (hours)</span>
+                    <span class="stat-value" id="c-protected">--</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">⏹ Stopped (capacity)</span>
+                    <span class="stat-value red" id="c-capacity-stop">--</span>
+                </div>
+            </div>
+            <div>
+                <div class="section-title">💰 Total Savings</div>
+                <div class="stat-row">
+                    <span class="stat-label">⚡ Cap peaks</span>
+                    <span class="stat-value red" id="c-peaks">--</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">🏠 House</span>
+                    <span class="stat-value green" id="c-house-savings">--</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">🚗 Tesla</span>
+                    <span class="stat-value green" id="c-tesla-savings">--</span>
+                </div>
+                <div class="stat-row" style="border-top:1px solid #333;margin-top:4px;padding-top:8px">
+                    <span class="stat-label"><strong>Total saved</strong></span>
+                    <span class="stat-value green" style="font-size:1rem;font-weight:700" id="c-total-savings">--</span>
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- RECOMMENDATION -->
@@ -236,9 +377,11 @@
 <div class="updated">Last updated: <span id="updated">--</span> · Auto-refreshes every 60s</div>
 
 <script>
-const HA_URL   = "http://192.168.12.191:8123";
+const HA_URL   = "https://homeassistant.myhome-automation.com";
 const HA_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJiODY1NDg5NzRlZWY0N2Q3YTgzMTQ2YjNiMmJmNjMzOCIsImlhdCI6MTc3OTg0NDk5OCwiZXhwIjoyMDk1MjA0OTk4fQ.4s-vIvvkyRblukNoeLIYqx4qv32vPXg_LywB_j_qnxo";
 const FLAT     = 11.5;
+const LAT      = 41.7421;
+const LON      = -88.2456;
 
 let priceChart = null;
 
@@ -262,18 +405,42 @@ async function getComEdPrice() {
         const r2 = await fetch("https://hourlypricing.comed.com/api?type=currenthouraverage");
         const d  = await r.json();
         const d2 = await r2.json();
-        return {
-            current: parseFloat(d[0].price),
-            avg:     parseFloat(d2[0].price)
-        };
+        return { current: parseFloat(d[0].price), avg: parseFloat(d2[0].price) };
     } catch(e) { return null; }
 }
 
 async function getComEdChart() {
     try {
-        const r = await fetch("https://hourlypricing.comed.com/api?type=houraverage");
-        return await r.json();
+        const r = await fetch("https://hourlypricing.comed.com/api?type=5minutefeed");
+        const data = await r.json();
+        return data.map(d => ({ millisUTC: d.millisUTC, price: d.price })).reverse();
     } catch(e) { return []; }
+}
+
+async function getWeather() {
+    try {
+        const r = await fetch(
+            `https://api.open-meteo.com/v1/forecast` +
+            `?latitude=${LAT}&longitude=${LON}` +
+            `&current=temperature_2m,weather_code` +
+            `&daily=temperature_2m_max,temperature_2m_min` +
+            `&temperature_unit=celsius` +
+            `&timezone=America%2FChicago` +
+            `&forecast_days=2`
+        );
+        return await r.json();
+    } catch(e) { return null; }
+}
+
+function weatherIcon(code) {
+    if (code === 0) return "☀️";
+    if (code <= 2)  return "⛅";
+    if (code <= 3)  return "☁️";
+    if (code <= 48) return "🌫️";
+    if (code <= 67) return "🌧️";
+    if (code <= 77) return "❄️";
+    if (code <= 82) return "🌦️";
+    return "⛈️";
 }
 
 function tierInfo(price) {
@@ -299,15 +466,53 @@ function fToC(f) {
     return f ? Math.round((f - 32) * 5/9 * 10) / 10 : 0;
 }
 
-async function loadState() {
+function getBestTimeToday(chartData, currentPrice) {
+    if (!chartData || chartData.length === 0) return "Data unavailable";
+    if (currentPrice <= 2)      return "⚡ Right now! " + currentPrice.toFixed(1) + "¢ — excellent!";
+    else if (currentPrice <= 3) return "✅ Right now! " + currentPrice.toFixed(1) + "¢ — very good";
+    else if (currentPrice <= 5) return "👍 Now is decent at " + currentPrice.toFixed(1) + "¢";
+    const recent = chartData.slice(0, 36);
+    if (!recent.length) return "Data unavailable";
+    const cheapest = recent.reduce((min, d) =>
+        parseFloat(d.price) < parseFloat(min.price) ? d : min
+    );
+    const cheapTime = new Date(parseInt(cheapest.millisUTC));
+    const price = parseFloat(cheapest.price);
+    const timeStr = cheapTime.toLocaleTimeString('en-US', {
+        hour: 'numeric', minute: '2-digit', hour12: true
+    });
+    return "⏳ Best recent: " + timeStr + " at " + price.toFixed(1) + "¢";
+}
+
+async function updateCounters() {
     try {
-        const r = await fetch("/local/state_cache.json");
-        return await r.json();
-    } catch(e) { return null; }
+        const r = await fetch(
+            HA_URL + "/api/states/sensor.comed_counters",
+            { headers: haHeaders() }
+        );
+        if (r.ok) {
+            const data = await r.json();
+            const c = JSON.parse(data.state);
+            document.getElementById("start-date").textContent      = c.start_date || "--";
+            document.getElementById("c-cooled").textContent        = c.thermostat_cooled || 0;
+            document.getElementById("c-raised").textContent        = c.thermostat_raised || 0;
+            document.getElementById("c-precool").textContent       = c.precool_triggered || 0;
+            document.getElementById("c-started").textContent       = c.tesla_started || 0;
+            document.getElementById("c-spike").textContent         = c.tesla_stopped_spike || 0;
+            document.getElementById("c-protected").textContent     = c.tesla_stopped_protected || 0;
+            document.getElementById("c-capacity-stop").textContent = c.tesla_stopped_capacity || 0;
+            document.getElementById("c-peaks").textContent         = c.capacity_peaks || 0;
+            document.getElementById("c-house-savings").textContent = "$" + (c.total_savings_house || 0).toFixed(2);
+            document.getElementById("c-tesla-savings").textContent = "$" + (c.total_savings_tesla || 0).toFixed(2);
+            const total = (c.total_savings_house || 0) + (c.total_savings_tesla || 0);
+            document.getElementById("c-total-savings").textContent = "$" + total.toFixed(2);
+        }
+    } catch(e) {
+        console.error("Counters fetch failed:", e);
+    }
 }
 
 async function update() {
-    // ComEd price
     const price = await getComEdPrice();
     if (price) {
         const tier = tierInfo(price.avg);
@@ -327,7 +532,11 @@ async function update() {
         savEl.textContent = (savHr >= 0 ? "+$" : "-$") + Math.abs(savHr).toFixed(3);
         savEl.style.color = savHr >= 0 ? "#00cc66" : "#ff6600";
 
-        // Recommendation
+        const isPeak = price.avg > 10 &&
+            new Date().getMonth() >= 5 &&
+            new Date().getMonth() <= 8;
+        document.getElementById("peak-warning").style.display = isPeak ? "block" : "none";
+
         let rec = "";
         if (price.avg < 0)       rec = "⚡ Negative price! Free electricity — run everything now!";
         else if (price.avg < 2)  rec = "⚡ Excellent price! Great time for dishwasher, laundry, EV charging.";
@@ -337,9 +546,28 @@ async function update() {
         else if (price.avg < 12) rec = "⚠️ High price — reduce usage if possible.";
         else                     rec = "🔴 Peak price! Avoid dishwasher, laundry, and heavy appliances.";
         document.getElementById("rec").textContent = rec;
+
+        const now = new Date();
+        const hoursElapsed = now.getHours() + now.getMinutes() / 60;
+        const estSavings = (FLAT - price.avg) / 100 * hoursElapsed * 1.5;
+        document.getElementById("savings-today").textContent =
+            (estSavings >= 0 ? "$" : "-$") + Math.abs(estSavings).toFixed(2);
+        document.getElementById("avg-today").textContent = price.avg.toFixed(2) + "¢/kWh";
     }
 
-    // Thermostat
+    document.getElementById("hours-beat").textContent = "-- / 24 hrs";
+    document.getElementById("cap-peaks").textContent  = "0 this month";
+
+    const weather = await getWeather();
+    if (weather) {
+        const curr  = weather.current;
+        const daily = weather.daily;
+        document.getElementById("weather-icon").textContent = weatherIcon(curr.weather_code);
+        document.getElementById("weather-temp").textContent = curr.temperature_2m.toFixed(1) + "°C";
+        document.getElementById("weather-high").textContent = daily.temperature_2m_max[0].toFixed(1) + "°C";
+        document.getElementById("weather-low").textContent  = daily.temperature_2m_min[0].toFixed(1) + "°C";
+    }
+
     const ecobee = await getEntity("climate.my_ecobee");
     if (ecobee) {
         const indoorC = fToC(ecobee.attributes.current_temperature);
@@ -348,64 +576,65 @@ async function update() {
         const dotColor = action === "cooling" ? "#00cc66" :
                          action === "heating" ? "#ff6600" :
                          action === "fan"     ? "#6688ff" : "#555";
-
-        document.getElementById("indoor").textContent   = indoorC + "°C";
-        document.getElementById("setpoint").textContent = targetC + "°C";
+        document.getElementById("indoor").textContent    = indoorC + "°C";
+        document.getElementById("setpoint").textContent  = targetC + "°C";
         document.getElementById("hvac-mode").textContent = ecobee.state;
         document.getElementById("hvac-action").innerHTML =
             '<span class="dot" style="background:' + dotColor + '"></span>' + action;
-        document.getElementById("preset").textContent =
-            ecobee.attributes.preset_mode || "--";
+        document.getElementById("preset").textContent    = ecobee.attributes.preset_mode || "--";
     }
 
-    // Tesla
     const tLoc  = await getEntity("device_tracker.lady_t_location");
     const tBatt = await getEntity("sensor.lady_t_battery_level");
     const tChg  = await getEntity("sensor.lady_t_charging");
     const tPwr  = await getEntity("sensor.wall_connector_power");
     const tLim  = await getEntity("number.lady_t_charge_limit");
 
-    if (tLoc) {
-        const loc = tLoc.state;
-        document.getElementById("t-location").textContent =
-            loc === "home"    ? "🏠 Home" :
-            loc === "unknown" ? "😴 Asleep" :
-            "🚗 Away";
+    if (tLoc) document.getElementById("t-location").textContent =
+        tLoc.state === "home"    ? "🏠 Home" :
+        tLoc.state === "unknown" ? "😴 Asleep" : "🚗 Away";
+
+    if (tBatt && tBatt.state !== "unknown" && tBatt.state !== "unavailable") {
+        const batt  = parseFloat(tBatt.state);
+        const limit = tLim ? parseFloat(tLim.state) : 85;
+        const battColor = batt < 20 ? "#ff4400" : batt < 50 ? "#ffaa00" : "#00cc66";
+        document.getElementById("t-battery").textContent       = batt + "%";
+        document.getElementById("t-battery-label").textContent = batt + "%";
+        document.getElementById("t-battery-bar").style.width   = batt + "%";
+        document.getElementById("t-battery-bar").style.background = battColor;
+        document.getElementById("t-limit-label").textContent   = limit + "%";
+    } else {
+        document.getElementById("t-battery").textContent       = "😴 Asleep";
+        document.getElementById("t-battery-label").textContent = "--";
+        document.getElementById("t-battery-bar").style.width   = "0%";
+        document.getElementById("t-limit-label").textContent   = "85%";
     }
-    if (tBatt) document.getElementById("t-battery").textContent =
-        tBatt.state + "%";
+
     if (tChg) {
         const chgColor = tChg.state.toLowerCase() === "charging" ? "#00cc66" :
                          tChg.state.toLowerCase() === "stopped"  ? "#ffaa00" : "#666";
         document.getElementById("t-charging").innerHTML =
             '<span style="color:' + chgColor + '">' + tChg.state + '</span>';
     }
-    if (tPwr)  document.getElementById("t-power").textContent =
-        tPwr.state + " kW";
-    if (tLim)  document.getElementById("t-limit").textContent =
-        tLim.state + "%";
 
-    // Today savings from HA sensor or estimate
-    if (price) {
-        // Simple estimate based on current price
-        const now = new Date();
-        const hoursElapsed = now.getHours() + now.getMinutes() / 60;
-        const estSavings = (FLAT - price.avg) / 100 * hoursElapsed * 1.5;
-        document.getElementById("savings-today").textContent =
-            (estSavings >= 0 ? "$" : "-$") + Math.abs(estSavings).toFixed(2);
-        document.getElementById("avg-today").textContent =
-            price.avg.toFixed(2) + "¢/kWh";
+    if (tPwr) document.getElementById("t-power").textContent = tPwr.state + " kW";
+    if (tLim && tLim.state !== "unknown" && tLim.state !== "unavailable") {
+        document.getElementById("t-limit").textContent = tLim.state + "%";
+        document.getElementById("t-limit-label").textContent = tLim.state + "%";
+    } else {
+        document.getElementById("t-limit").textContent = "85%";
+        document.getElementById("t-limit-label").textContent = "85%";
     }
 
-    document.getElementById("hours-beat").textContent = "-- / 24 hrs";
-    document.getElementById("cap-peaks").textContent  = "0 this month";
-    document.getElementById("updated").textContent    =
-        new Date().toLocaleTimeString();
+    document.getElementById("updated").textContent = new Date().toLocaleTimeString();
 }
 
 async function updateChart() {
     const data = await getComEdChart();
     if (!data.length) return;
+
+    const currentPrice = data.length ? parseFloat(data[data.length-1].price) : 0;
+    document.getElementById("best-time").textContent = getBestTimeToday(data, currentPrice);
 
     const labels = data.map(d => {
         const date = new Date(parseInt(d.millisUTC));
@@ -425,30 +654,18 @@ async function updateChart() {
             type: "bar",
             data: {
                 labels,
-                datasets: [{
-                    data: prices,
-                    backgroundColor: colors,
-                    borderRadius: 3,
-                }]
+                datasets: [{ data: prices, backgroundColor: colors, borderRadius: 3 }]
             },
             options: {
                 responsive: true,
                 plugins: { legend: { display: false } },
                 scales: {
                     x: {
-                        ticks: {
-                            color: "#555",
-                            maxTicksLimit: 10,
-                            font: { size: 9 }
-                        },
+                        ticks: { color: "#555", maxTicksLimit: 10, font: { size: 9 } },
                         grid: { color: "#1a1a1a" }
                     },
                     y: {
-                        ticks: {
-                            color: "#555",
-                            callback: v => v + "¢",
-                            font: { size: 9 }
-                        },
+                        ticks: { color: "#555", callback: v => v + "¢", font: { size: 9 } },
                         grid: { color: "#1a1a1a" }
                     }
                 }
@@ -457,13 +674,13 @@ async function updateChart() {
     }
 }
 
-// Run on load
 update();
 updateChart();
+updateCounters();
 
-// Auto refresh
 setInterval(update, 60000);
 setInterval(updateChart, 300000);
+setInterval(updateCounters, 60000);
 </script>
 </body>
 </html>

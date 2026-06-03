@@ -27,12 +27,12 @@ TESLA_LOCATION         = "device_tracker.lady_t_location"
 TESLA_WAKE_BUTTON      = "button.lady_t_wake"
 WALL_CONNECTOR_POWER   = "sensor.wall_connector_power"
 TESLA_MAX_BATTERY      = 85.0
-TESLA_CHARGE_PRICE     = 3.0
+TESLA_CHARGE_PRICE     = 2.0
 TESLA_STOP_PRICE_DAY   = 3.5
 TESLA_STOP_PRICE_NIGHT = 6.0
 TESLA_PROTECT_START    = 12
 TESLA_PROTECT_END      = 19
-TESLA_KWH_PER_PERCENT  = 0.83  # Model 3 LR, 290mi range
+TESLA_KWH_PER_PERCENT  = 0.83
 
 # Gmail
 GMAIL_USER    = "climatecontrol.pi@gmail.com"
@@ -88,6 +88,9 @@ DYNAMIC_COOL_SLEEP = [
 DYNAMIC_HEAT           = 19.5
 THERMOSTAT_UPDATE_MINS = 20
 
+# Counters
+COUNTERS_FILE = "/config/comed_ecobee/counters.json"
+
 logging.basicConfig(
     filename="/config/comed_ecobee/controller.log",
     level=logging.INFO,
@@ -97,7 +100,6 @@ logging.basicConfig(
 # -- HVAC SAVINGS -------------------------------------------------------------
 
 def get_hvac_kwh_per_hour(outdoor_temp_c):
-    """Trane 2.5 ton unit, 2000sqft home in Aurora IL."""
     if outdoor_temp_c > 32:    return 2.39
     elif outdoor_temp_c > 28:  return 1.88
     elif outdoor_temp_c > 22:  return 1.20
@@ -135,6 +137,31 @@ def load_state():
 def save_state(state):
     with open("/config/comed_ecobee/state.json", "w") as f:
         json.dump(state, f)
+
+# -- COUNTERS -----------------------------------------------------------------
+
+def load_counters():
+    try:
+        with open(COUNTERS_FILE, "r") as f:
+            return json.load(f)
+    except:
+        return {
+            "start_date":              datetime.now().strftime("%Y-%m-%d"),
+            "thermostat_cooled":       0,
+            "thermostat_raised":       0,
+            "tesla_started":           0,
+            "tesla_stopped_spike":     0,
+            "tesla_stopped_protected": 0,
+            "tesla_stopped_capacity":  0,
+            "capacity_peaks":          0,
+            "precool_triggered":       0,
+            "total_savings_house":     0.0,
+            "total_savings_tesla":     0.0
+        }
+
+def save_counters(counters):
+    with open(COUNTERS_FILE, "w") as f:
+        json.dump(counters, f)
 
 # -- HELPERS ------------------------------------------------------------------
 
@@ -369,6 +396,11 @@ def handle_capacity_peak(state, hour_avg, current_temp):
         "reason": f"Capacity peak - price {hour_avg:.2f}c, temp {current_temp:.1f}C",
         "price":  hour_avg
     })
+
+    counters = load_counters()
+    counters["capacity_peaks"] += 1
+    save_counters(counters)
+
     send_email(
         "Warning: Capacity Peak - Reduce Usage Now!",
         f"Price: {hour_avg:.2f}c/kWh | Temp: {current_temp:.1f}C\n"
@@ -386,7 +418,6 @@ def handle_capacity_peak(state, hour_avg, current_temp):
 def get_tesla_state():
     headers = {"Authorization": f"Bearer {HA_TOKEN}"}
 
-    # Check location first
     r_loc = requests.get(
         f"{HA_URL}/api/states/{TESLA_LOCATION}",
         headers=headers, timeout=30
@@ -394,7 +425,6 @@ def get_tesla_state():
     r_loc.raise_for_status()
     location = r_loc.json()["state"]
 
-    # Check charging status
     r_chg = requests.get(
         f"{HA_URL}/api/states/{TESLA_CHARGING_SENSOR}",
         headers=headers, timeout=30
@@ -491,6 +521,21 @@ def set_tesla_charging(enable, reason=""):
     action = "Started" if enable else "Stopped"
     logging.info(f"{action} Tesla charging - {reason}" if reason else f"{action} Tesla charging")
 
+    counters = load_counters()
+    if enable:
+        counters["tesla_started"] += 1
+    else:
+        reason_lower = reason.lower()
+        if "spike" in reason_lower or "stop threshold" in reason_lower:
+            counters["tesla_stopped_spike"] += 1
+        elif "capacity" in reason_lower:
+            counters["tesla_stopped_capacity"] += 1
+        elif "protected" in reason_lower or "noon" in reason_lower:
+            counters["tesla_stopped_protected"] += 1
+        else:
+            counters["tesla_stopped_spike"] += 1
+    save_counters(counters)
+
 def handle_tesla_charging(hour_avg, state, is_capacity_peak, is_capacity_day):
     try:
         if not should_check_tesla(hour_avg, state):
@@ -511,7 +556,6 @@ def handle_tesla_charging(hour_avg, state, is_capacity_peak, is_capacity_day):
         is_charging = tesla["switch"] == "on"
         now_hour    = datetime.now().hour
 
-        # Handle sleeping Tesla
         if battery is None:
             if hour_avg <= TESLA_CHARGE_PRICE and not is_capacity_day and not is_capacity_peak:
                 if state.get("tesla_wake_hour") == now_hour:
@@ -549,14 +593,12 @@ def handle_tesla_charging(hour_avg, state, is_capacity_peak, is_capacity_day):
                 logging.info(f"Tesla asleep - price {hour_avg:.2f}c not cheap enough to wake")
                 return state
 
-        # Track overnight
         if is_overnight_charging_window():
             if state.get("overnight_start_battery") is None:
                 state["overnight_start_battery"] = battery
                 state["overnight_prices"] = []
             state.setdefault("overnight_prices", []).append(hour_avg)
 
-        # Never exceed max battery
         if battery >= TESLA_MAX_BATTERY:
             if is_charging:
                 reason = f"Battery reached {battery:.0f}%"
@@ -571,7 +613,6 @@ def handle_tesla_charging(hour_avg, state, is_capacity_peak, is_capacity_day):
         in_protect_hours = TESLA_PROTECT_START <= now_hour < TESLA_PROTECT_END
         stop_price       = TESLA_STOP_PRICE_NIGHT if in_night else TESLA_STOP_PRICE_DAY
 
-        # Capacity peak or day - stop no exceptions
         if is_capacity_peak or is_capacity_day:
             if is_charging:
                 reason = f"Capacity {'peak' if is_capacity_peak else 'day'} - price {hour_avg:.2f}c"
@@ -583,7 +624,6 @@ def handle_tesla_charging(hour_avg, state, is_capacity_peak, is_capacity_day):
                 state["tesla_paused"] = True
             return state
 
-        # Price < 3c anywhere = always charge
         if hour_avg <= TESLA_CHARGE_PRICE:
             if not is_charging and battery < TESLA_MAX_BATTERY:
                 reason = f"Cheap price {hour_avg:.2f}c - always charge below {TESLA_CHARGE_PRICE}c"
@@ -595,7 +635,6 @@ def handle_tesla_charging(hour_avg, state, is_capacity_peak, is_capacity_day):
                 state["tesla_paused"] = False
             return state
 
-        # Price > stop threshold - stop charging
         if hour_avg > stop_price:
             if is_charging:
                 reason = f"Price {hour_avg:.2f}c > stop threshold {stop_price}c"
@@ -607,7 +646,6 @@ def handle_tesla_charging(hour_avg, state, is_capacity_peak, is_capacity_day):
                 state["tesla_paused"] = True
             return state
 
-        # Protected hours noon-7PM and price > 3c - stop
         if in_protect_hours and hour_avg > TESLA_CHARGE_PRICE:
             if is_charging:
                 reason = f"Protected hours noon-7PM - price {hour_avg:.2f}c"
@@ -619,7 +657,6 @@ def handle_tesla_charging(hour_avg, state, is_capacity_peak, is_capacity_day):
                 state["tesla_paused"] = True
             return state
 
-        # Overnight window and price <= 6c - keep charging
         if in_night and hour_avg <= TESLA_STOP_PRICE_NIGHT:
             if not is_charging and battery < TESLA_MAX_BATTERY:
                 reason = f"Overnight window - price {hour_avg:.2f}c"
@@ -678,6 +715,12 @@ def send_morning_report(state):
             d_section = "\nDAYTIME INTERACTIONS:\n"
             for e in daytime_events:
                 d_section += f"  {e['time']} - Charging {e['action']}: {e['reason']}\n"
+
+        counters = load_counters()
+        counters["total_savings_tesla"] = round(
+            counters.get("total_savings_tesla", 0) + max(0, savings), 2
+        )
+        save_counters(counters)
 
         send_email(
             f"Daily Charging Report - {datetime.now().strftime('%B %d')}",
@@ -800,6 +843,13 @@ def main():
                 n_paused    = sum(1 for e in events if e["action"] == "stopped")
                 n_resumed   = sum(1 for e in events if e["action"] == "started")
                 peaks_today = sum(1 for k in state.get("capacity_peaks", {}) if k.startswith(f"peak_{now.strftime('%Y%m%d')}"))
+
+                counters = load_counters()
+                counters["total_savings_house"] = round(
+                    counters.get("total_savings_house", 0) + max(0, savings), 2
+                )
+                save_counters(counters)
+
                 try:
                     tesla      = get_tesla_state()
                     tesla_line = f"Battery: {tesla['battery']:.0f}%\n" if tesla["plugged_in"] and tesla["battery"] else ""
@@ -831,12 +881,15 @@ def main():
         target_cool = 20.0 if forecast["very_expensive"] else 21.0
         set_temperature(DYNAMIC_HEAT, target_cool)
         logging.info(f"Pre-cooling for tomorrow: {target_cool}C")
+        counters = load_counters()
+        counters["precool_triggered"] += 1
+        save_counters(counters)
         state["last_cool_setpoint"]     = target_cool
         state["last_thermostat_update"] = time.time()
         save_state(state)
         return
 
-    # Dynamic thermostat - update every 20 minutes
+    # Dynamic thermostat
     try:
         ha_state = get_ha_state()
         preset   = ha_state["attributes"].get("preset_mode", "")
@@ -856,6 +909,9 @@ def main():
                 set_temperature(DYNAMIC_HEAT, new_cool)
                 state["last_cool_setpoint"]     = new_cool
                 state["last_thermostat_update"] = time.time()
+                counters = load_counters()
+                counters["thermostat_raised"] += 1
+                save_counters(counters)
                 logging.info(f"Capacity mode - holding baseline: {new_cool}C")
 
         else:
@@ -869,6 +925,12 @@ def main():
                 set_temperature(DYNAMIC_HEAT, new_cool)
                 state["last_cool_setpoint"]     = new_cool
                 state["last_thermostat_update"] = time.time()
+                counters = load_counters()
+                if new_cool < current_cool:
+                    counters["thermostat_cooled"] += 1
+                else:
+                    counters["thermostat_raised"] += 1
+                save_counters(counters)
                 logging.info(f"Dynamic setpoint: {new_cool}C (target: {target_cool}C, price: {hour_avg:.2f}c)")
 
     except Exception as e:
