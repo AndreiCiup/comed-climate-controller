@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Home Energy Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            background: #0f0f0f;
+            color: #e0e0e0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            min-height: 100vh;
+            padding: 16px;
+        }
+
+        h1 {
+            text-align: center;
+            font-size: 1rem;
+            color: #666;
+            margin-bottom: 16px;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        .card {
+            background: #1a1a1a;
+            border-radius: 16px;
+            padding: 16px;
+            border: 1px solid #2a2a2a;
+        }
+
+        .card.full {
+            grid-column: 1 / -1;
+        }
+
+        .card-title {
+            font-size: 0.65rem;
+            color: #555;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            margin-bottom: 10px;
+        }
+
+        .price-big {
+            font-size: 3.8rem;
+            font-weight: 700;
+            line-height: 1;
+            margin-bottom: 6px;
+            transition: color 0.5s;
+        }
+
+        .tier-badge {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 20px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .subtext {
+            font-size: 0.8rem;
+            color: #888;
+            margin-top: 4px;
+        }
+
+        .green  { color: #00cc66; }
+        .yellow { color: #ffaa00; }
+        .red    { color: #ff4400; }
+        .grey   { color: #666; }
+
+        .stat-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 5px 0;
+            border-bottom: 1px solid #222;
+            font-size: 0.82rem;
+        }
+
+        .stat-row:last-child { border-bottom: none; }
+        .stat-label { color: #666; }
+        .stat-value { font-weight: 500; }
+
+        .dot {
+            display: inline-block;
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            margin-right: 5px;
+        }
+
+        .rec-box {
+            background: #111f11;
+            border: 1px solid #1a3a1a;
+            border-radius: 12px;
+            padding: 12px 16px;
+            font-size: 0.85rem;
+            color: #88bb88;
+            text-align: center;
+            line-height: 1.5;
+        }
+
+        .updated {
+            text-align: center;
+            font-size: 0.65rem;
+            color: #333;
+            margin-top: 14px;
+        }
+
+        .savings-big {
+            font-size: 2rem;
+            font-weight: 700;
+            color: #00cc66;
+            margin-bottom: 2px;
+        }
+
+        canvas { max-height: 160px; }
+
+        @media (max-width: 420px) {
+            .grid { grid-template-columns: 1fr; }
+            .card.full { grid-column: 1; }
+            .price-big { font-size: 3rem; }
+        }
+    </style>
+</head>
+<body>
+
+<h1>🏠 Home Energy — Aurora IL</h1>
+
+<div class="grid">
+
+    <!-- PRICE CARD -->
+    <div class="card">
+        <div class="card-title">Current Price</div>
+        <div class="price-big" id="price">--</div>
+        <div><span class="tier-badge" id="tier-badge">--</span></div>
+        <div class="subtext">5-min: <span id="price5">--</span></div>
+        <div class="subtext" style="margin-top:6px">
+            Saving <span id="savings-hr" class="green">--</span>/hr vs flat rate
+        </div>
+    </div>
+
+    <!-- TODAY SAVINGS -->
+    <div class="card">
+        <div class="card-title">Today's Savings</div>
+        <div class="savings-big" id="savings-today">$--</div>
+        <div class="stat-row">
+            <span class="stat-label">Avg price</span>
+            <span class="stat-value" id="avg-today">--</span>
+        </div>
+        <div class="stat-row">
+            <span class="stat-label">Beat flat rate</span>
+            <span class="stat-value" id="hours-beat">--</span>
+        </div>
+        <div class="stat-row">
+            <span class="stat-label">Cap peaks/month</span>
+            <span class="stat-value" id="cap-peaks">--</span>
+        </div>
+    </div>
+
+    <!-- THERMOSTAT -->
+    <div class="card">
+        <div class="card-title">Thermostat</div>
+        <div class="stat-row">
+            <span class="stat-label">Indoor temp</span>
+            <span class="stat-value" id="indoor">--</span>
+        </div>
+        <div class="stat-row">
+            <span class="stat-label">Setpoint</span>
+            <span class="stat-value" id="setpoint">--</span>
+        </div>
+        <div class="stat-row">
+            <span class="stat-label">Mode</span>
+            <span class="stat-value" id="hvac-mode">--</span>
+        </div>
+        <div class="stat-row">
+            <span class="stat-label">Status</span>
+            <span class="stat-value" id="hvac-action">--</span>
+        </div>
+        <div class="stat-row">
+            <span class="stat-label">Preset</span>
+            <span class="stat-value" id="preset">--</span>
+        </div>
+    </div>
+
+    <!-- TESLA -->
+    <div class="card">
+        <div class="card-title">Lady T 🚗</div>
+        <div class="stat-row">
+            <span class="stat-label">Location</span>
+            <span class="stat-value" id="t-location">--</span>
+        </div>
+        <div class="stat-row">
+            <span class="stat-label">Battery</span>
+            <span class="stat-value" id="t-battery">--</span>
+        </div>
+        <div class="stat-row">
+            <span class="stat-label">Charging</span>
+            <span class="stat-value" id="t-charging">--</span>
+        </div>
+        <div class="stat-row">
+            <span class="stat-label">Power</span>
+            <span class="stat-value" id="t-power">--</span>
+        </div>
+        <div class="stat-row">
+            <span class="stat-label">Charge limit</span>
+            <span class="stat-value" id="t-limit">--</span>
+        </div>
+    </div>
+
+    <!-- PRICE CHART -->
+    <div class="card full">
+        <div class="card-title">Today's Price Chart</div>
+        <canvas id="chart"></canvas>
+    </div>
+
+    <!-- RECOMMENDATION -->
+    <div class="card full">
+        <div class="rec-box" id="rec">Loading...</div>
+    </div>
+
+</div>
+
+<div class="updated">Last updated: <span id="updated">--</span> · Auto-refreshes every 60s</div>
+
+<script>
+const HA_URL   = "http://192.168.12.191:8123";
+const HA_TOKEN = "***REMOVED***";
+const FLAT     = 11.5;
+
+let priceChart = null;
+
+function haHeaders() {
+    return {
+        "Authorization": "Bearer " + HA_TOKEN,
+        "Content-Type": "application/json"
+    };
+}
+
+async function getEntity(id) {
+    try {
+        const r = await fetch(HA_URL + "/api/states/" + id, { headers: haHeaders() });
+        return await r.json();
+    } catch(e) { return null; }
+}
+
+async function getComEdPrice() {
+    try {
+        const r  = await fetch("https://hourlypricing.comed.com/api?type=5minutefeed");
+        const r2 = await fetch("https://hourlypricing.comed.com/api?type=currenthouraverage");
+        const d  = await r.json();
+        const d2 = await r2.json();
+        return {
+            current: parseFloat(d[0].price),
+            avg:     parseFloat(d2[0].price)
+        };
+    } catch(e) { return null; }
+}
+
+async function getComEdChart() {
+    try {
+        const r = await fetch("https://hourlypricing.comed.com/api?type=houraverage");
+        return await r.json();
+    } catch(e) { return []; }
+}
+
+function tierInfo(price) {
+    if (price < 0)   return { label: "NEGATIVE",   color: "#00ff99" };
+    if (price < 1)   return { label: "FREE",        color: "#00ff99" };
+    if (price < 2)   return { label: "VERY CHEAP",  color: "#00cc66" };
+    if (price < 3)   return { label: "CHEAP",       color: "#66bb00" };
+    if (price < 5)   return { label: "LOW",         color: "#99bb00" };
+    if (price < 9)   return { label: "NORMAL",      color: "#ffaa00" };
+    if (price < 12)  return { label: "HIGH",        color: "#ff6600" };
+    return              { label: "PEAK",         color: "#ff2200" };
+}
+
+function barColor(price) {
+    if (price < 3)  return "#00cc66";
+    if (price < 5)  return "#88bb00";
+    if (price < 9)  return "#ffaa00";
+    if (price < 12) return "#ff6600";
+    return "#ff2200";
+}
+
+function fToC(f) {
+    return f ? Math.round((f - 32) * 5/9 * 10) / 10 : 0;
+}
+
+async function loadState() {
+    try {
+        const r = await fetch("/local/state_cache.json");
+        return await r.json();
+    } catch(e) { return null; }
+}
+
+async function update() {
+    // ComEd price
+    const price = await getComEdPrice();
+    if (price) {
+        const tier = tierInfo(price.avg);
+        const savHr = (FLAT - price.avg) / 100 * 1.5;
+
+        document.getElementById("price").textContent = price.avg.toFixed(2) + "¢";
+        document.getElementById("price").style.color = tier.color;
+        document.getElementById("price5").textContent = price.current.toFixed(2) + "¢";
+
+        const badge = document.getElementById("tier-badge");
+        badge.textContent = tier.label;
+        badge.style.background = tier.color + "22";
+        badge.style.color = tier.color;
+        badge.style.border = "1px solid " + tier.color + "55";
+
+        const savEl = document.getElementById("savings-hr");
+        savEl.textContent = (savHr >= 0 ? "+$" : "-$") + Math.abs(savHr).toFixed(3);
+        savEl.style.color = savHr >= 0 ? "#00cc66" : "#ff6600";
+
+        // Recommendation
+        let rec = "";
+        if (price.avg < 0)       rec = "⚡ Negative price! Free electricity — run everything now!";
+        else if (price.avg < 2)  rec = "⚡ Excellent price! Great time for dishwasher, laundry, EV charging.";
+        else if (price.avg < 3)  rec = "✅ Very cheap — good time to run appliances.";
+        else if (price.avg < 5)  rec = "👍 Below average — comfortable to use electricity freely.";
+        else if (price.avg < 9)  rec = "😐 Normal pricing — no special action needed.";
+        else if (price.avg < 12) rec = "⚠️ High price — reduce usage if possible.";
+        else                     rec = "🔴 Peak price! Avoid dishwasher, laundry, and heavy appliances.";
+        document.getElementById("rec").textContent = rec;
+    }
+
+    // Thermostat
+    const ecobee = await getEntity("climate.my_ecobee");
+    if (ecobee) {
+        const indoorC = fToC(ecobee.attributes.current_temperature);
+        const targetC = fToC(ecobee.attributes.temperature);
+        const action  = ecobee.attributes.hvac_action || "idle";
+        const dotColor = action === "cooling" ? "#00cc66" :
+                         action === "heating" ? "#ff6600" :
+                         action === "fan"     ? "#6688ff" : "#555";
+
+        document.getElementById("indoor").textContent   = indoorC + "°C";
+        document.getElementById("setpoint").textContent = targetC + "°C";
+        document.getElementById("hvac-mode").textContent = ecobee.state;
+        document.getElementById("hvac-action").innerHTML =
+            '<span class="dot" style="background:' + dotColor + '"></span>' + action;
+        document.getElementById("preset").textContent =
+            ecobee.attributes.preset_mode || "--";
+    }
+
+    // Tesla
+    const tLoc  = await getEntity("device_tracker.lady_t_location");
+    const tBatt = await getEntity("sensor.lady_t_battery_level");
+    const tChg  = await getEntity("sensor.lady_t_charging");
+    const tPwr  = await getEntity("sensor.wall_connector_power");
+    const tLim  = await getEntity("number.lady_t_charge_limit");
+
+    if (tLoc) {
+        const loc = tLoc.state;
+        document.getElementById("t-location").textContent =
+            loc === "home"    ? "🏠 Home" :
+            loc === "unknown" ? "😴 Asleep" :
+            "🚗 Away";
+    }
+    if (tBatt) document.getElementById("t-battery").textContent =
+        tBatt.state + "%";
+    if (tChg) {
+        const chgColor = tChg.state.toLowerCase() === "charging" ? "#00cc66" :
+                         tChg.state.toLowerCase() === "stopped"  ? "#ffaa00" : "#666";
+        document.getElementById("t-charging").innerHTML =
+            '<span style="color:' + chgColor + '">' + tChg.state + '</span>';
+    }
+    if (tPwr)  document.getElementById("t-power").textContent =
+        tPwr.state + " kW";
+    if (tLim)  document.getElementById("t-limit").textContent =
+        tLim.state + "%";
+
+    // Today savings from HA sensor or estimate
+    if (price) {
+        // Simple estimate based on current price
+        const now = new Date();
+        const hoursElapsed = now.getHours() + now.getMinutes() / 60;
+        const estSavings = (FLAT - price.avg) / 100 * hoursElapsed * 1.5;
+        document.getElementById("savings-today").textContent =
+            (estSavings >= 0 ? "$" : "-$") + Math.abs(estSavings).toFixed(2);
+        document.getElementById("avg-today").textContent =
+            price.avg.toFixed(2) + "¢/kWh";
+    }
+
+    document.getElementById("hours-beat").textContent = "-- / 24 hrs";
+    document.getElementById("cap-peaks").textContent  = "0 this month";
+    document.getElementById("updated").textContent    =
+        new Date().toLocaleTimeString();
+}
+
+async function updateChart() {
+    const data = await getComEdChart();
+    if (!data.length) return;
+
+    const labels = data.map(d => {
+        const date = new Date(parseInt(d.millisUTC));
+        return date.getHours() + ":" + String(date.getMinutes()).padStart(2, "0");
+    });
+    const prices = data.map(d => parseFloat(d.price));
+    const colors = prices.map(barColor);
+
+    if (priceChart) {
+        priceChart.data.labels = labels;
+        priceChart.data.datasets[0].data = prices;
+        priceChart.data.datasets[0].backgroundColor = colors;
+        priceChart.update();
+    } else {
+        const ctx = document.getElementById("chart").getContext("2d");
+        priceChart = new Chart(ctx, {
+            type: "bar",
+            data: {
+                labels,
+                datasets: [{
+                    data: prices,
+                    backgroundColor: colors,
+                    borderRadius: 3,
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: { legend: { display: false } },
+                scales: {
+                    x: {
+                        ticks: {
+                            color: "#555",
+                            maxTicksLimit: 10,
+                            font: { size: 9 }
+                        },
+                        grid: { color: "#1a1a1a" }
+                    },
+                    y: {
+                        ticks: {
+                            color: "#555",
+                            callback: v => v + "¢",
+                            font: { size: 9 }
+                        },
+                        grid: { color: "#1a1a1a" }
+                    }
+                }
+            }
+        });
+    }
+}
+
+// Run on load
+update();
+updateChart();
+
+// Auto refresh
+setInterval(update, 60000);
+setInterval(updateChart, 300000);
+</script>
+</body>
+</html>
