@@ -486,13 +486,9 @@ function getBestTimeToday(chartData, currentPrice) {
 
 async function updateCounters() {
     try {
-        const r = await fetch(
-            HA_URL + "/api/states/sensor.comed_counters",
-            { headers: haHeaders() }
-        );
+        const r = await fetch("/local/counters.json");
         if (r.ok) {
-            const data = await r.json();
-            const c = JSON.parse(data.state);
+            const c = await r.json();
             document.getElementById("start-date").textContent      = c.start_date || "--";
             document.getElementById("c-cooled").textContent        = c.thermostat_cooled || 0;
             document.getElementById("c-raised").textContent        = c.thermostat_raised || 0;

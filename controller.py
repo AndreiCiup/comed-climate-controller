@@ -162,6 +162,12 @@ def load_counters():
 def save_counters(counters):
     with open(COUNTERS_FILE, "w") as f:
         json.dump(counters, f)
+    # Also copy to www for dashboard access
+    try:
+        with open("/config/www/counters.json", "w") as f:
+            json.dump(counters, f)
+    except:
+        pass
 
 # -- HELPERS ------------------------------------------------------------------
 
