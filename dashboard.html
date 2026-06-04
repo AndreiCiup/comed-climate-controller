@@ -205,6 +205,10 @@
             <div class="best-time-title">Best time for appliances today</div>
             <div id="best-time">Calculating...</div>
         </div>
+        <div id="pred-tomorrow-box" style="display:none;margin-top:6px;background:#11111a;border:1px solid #1a1a3a;border-radius:10px;padding:10px 14px;font-size:0.82rem;color:#8888ff">
+            <div class="best-time-title">Tomorrow's forecast (ML)</div>
+            <div id="pred-tomorrow-summary">--</div>
+        </div>
     </div>
 
     <!-- SAVINGS -->
@@ -300,6 +304,27 @@
         <div class="card-title">Today's Price Chart</div>
         <canvas id="chart"></canvas>
     </div>
+    <!-- PREDICTED PRICES -->
+<div class="card full" id="pred-card" style="display:none">
+    <div class="card-title">Tomorrow's Predicted Prices
+        <span id="pred-accuracy" style="float:right;color:#555;font-size:0.65rem"></span>
+    </div>
+    <canvas id="pred-chart"></canvas>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:10px">
+        <div style="background:#111a11;border:1px solid #1a3a1a;border-radius:8px;padding:8px">
+            <div class="best-time-title">⚡ Best Charging</div>
+            <div id="pred-charging" style="color:#00cc66;font-size:0.82rem">--</div>
+        </div>
+        <div style="background:#1a1111;border:1px solid #3a1a1a;border-radius:8px;padding:8px">
+            <div class="best-time-title">🔴 Peak Risk Hours</div>
+            <div id="pred-peaks" style="color:#ff6600;font-size:0.82rem">--</div>
+        </div>
+        <div style="background:#111118;border:1px solid #1a1a3a;border-radius:8px;padding:8px">
+            <div class="best-time-title">💡 Recommendation</div>
+            <div id="pred-rec" style="color:#8888ff;font-size:0.82rem">--</div>
+        </div>
+    </div>
+</div>
 
     <!-- CAPACITY WARNING -->
     <div class="peak-warning full" id="peak-warning">
@@ -669,10 +694,96 @@ async function updateChart() {
         });
     }
 }
+let predChart = null;
+
+async function updatePredictions() {
+    try {
+        const r = await fetch("/local/predictions.json");
+        if (!r.ok) return;
+        const p = await r.json();
+
+        // Show the card
+        document.getElementById("pred-card").style.display = "block";
+        document.getElementById("pred-tomorrow-box").style.display = "block";
+
+        // Accuracy badge
+        if (p.model_mae) {
+            document.getElementById("pred-accuracy").textContent =
+                "±" + p.model_mae + "¢ accuracy";
+        }
+
+        // Summary boxes
+        document.getElementById("pred-charging").textContent =
+            p.best_charging_window || "--";
+        document.getElementById("pred-peaks").textContent =
+            p.peak_risk_hours && p.peak_risk_hours.length
+                ? p.peak_risk_hours.map(h => h + ":00").join(", ")
+                : "None expected";
+        document.getElementById("pred-rec").textContent =
+            p.recommendation || "--";
+
+        // Tomorrow summary in weather card
+        const maxPred = p.predictions
+            ? Math.max(...p.predictions.map(x => x.predicted_price))
+            : null;
+        const minPred = p.predictions
+            ? Math.min(...p.predictions.map(x => x.predicted_price))
+            : null;
+        if (maxPred !== null) {
+            document.getElementById("pred-tomorrow-summary").textContent =
+                "Low " + minPred.toFixed(1) + "¢ · High " + maxPred.toFixed(1) + "¢";
+        }
+
+        // Predicted price chart
+        if (!p.predictions || !p.predictions.length) return;
+        const labels = p.predictions.map(x => x.hour + ":00");
+        const prices = p.predictions.map(x => x.predicted_price);
+        const colors = prices.map(barColor);
+
+        if (predChart) {
+            predChart.data.labels = labels;
+            predChart.data.datasets[0].data = prices;
+            predChart.data.datasets[0].backgroundColor = colors;
+            predChart.update();
+        } else {
+            const ctx = document.getElementById("pred-chart").getContext("2d");
+            predChart = new Chart(ctx, {
+                type: "bar",
+                data: {
+                    labels,
+                    datasets: [{
+                        data: prices,
+                        backgroundColor: colors,
+                        borderRadius: 3,
+                        label: "Predicted ¢/kWh"
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: {
+                            ticks: { color: "#555", font: { size: 9 } },
+                            grid: { color: "#1a1a1a" }
+                        },
+                        y: {
+                            ticks: { color: "#555", callback: v => v + "¢", font: { size: 9 } },
+                            grid: { color: "#1a1a1a" }
+                        }
+                    }
+                }
+            });
+        }
+    } catch(e) {
+        console.log("Predictions not available yet:", e);
+    }
+}
 
 update();
 updateChart();
 updateCounters();
+updatePredictions();
+setInterval(updatePredictions, 300000);
 
 setInterval(update, 60000);
 setInterval(updateChart, 300000);
