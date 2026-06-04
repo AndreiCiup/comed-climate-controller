@@ -45,7 +45,7 @@ CSV_HEADERS = [
 # Matches lines like:
 # 2026-05-26 22:04:33,707 INFO 5-min price: 5.50¢ | Hour avg: 8.30¢
 PRICE_RE = re.compile(
-    r"^(\d{4}-\d{2}-\d{2}) (\d{2}):\d{2}:\d{2},\d+ INFO 5-min price: [\d.]+¢ \| Hour avg: ([\d.]+)¢"
+    r"^(\d{4}-\d{2}-\d{2}) (\d{2}):\d{2}:\d{2},\d+ INFO 5-min price: [\d.]+[¢c] \| Hour avg: ([\d.]+)[¢c]"
 )
 
 # ── Step 1: Parse log → collect hourly readings ───────────────────────────────
