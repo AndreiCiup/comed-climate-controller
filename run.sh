@@ -1,7 +1,7 @@
 #!/bin/sh
 
 # Ensure Python and dependencies are installed on every boot
-apk add --quiet python3 py3-pip 2>/dev/null
+apk add --quiet python3 py3-pip py3-scikit-learn 2>/dev/null
 pip3 install --quiet requests --break-system-packages 2>/dev/null
 
 # Run the controller every 5 minutes
