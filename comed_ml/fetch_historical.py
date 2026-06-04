@@ -31,7 +31,7 @@ LAT         = 41.7421
 LON         = -88.2456
 OUTPUT_DIR  = "/config/comed_ml"
 OUTPUT_FILE = os.path.join(OUTPUT_DIR, "prices_weather.csv")
-DEFAULT_DAYS = 730  # 2 years
+DEFAULT_DAYS = 365  # 1 year
 
 COMED_HISTORY_URL = "https://hourlypricing.comed.com/api"
 WEATHER_HISTORY_URL = "https://archive-api.open-meteo.com/v1/archive"
@@ -65,33 +65,28 @@ def date_range(start: datetime, end: datetime):
 
 
 def fetch_comed_day(date) -> dict:
-    """
-    Fetch ComEd hourly averages for a single date.
-    Returns dict of {hour: price_cents} e.g. {0: 2.3, 1: 1.8, ...}
-    ComEd API returns 5-min intervals; we average them per billing hour.
-    """
     date_str = date.strftime("%Y%m%d")
     params = {
-        "type": "hour",
+        "type": "5minutefeed",
         "datestart": date_str + "0000",
-        "dateend": date_str + "2359",
+        "dateend":   date_str + "2359",
     }
     try:
         resp = requests.get(COMED_HISTORY_URL, params=params, timeout=15)
         resp.raise_for_status()
-        data = resp.json()
+        text = resp.text.strip()
+        if not text or text[0] != "[":
+            return {}
+        data = json.loads(text)
     except Exception as e:
         log(f"  ComEd fetch failed for {date}: {e}")
         return {}
 
-    hourly = {}
-    buckets = {}  # hour -> list of prices
-
+    buckets = {}
     for entry in data:
         try:
-            # millisecond timestamp from ComEd
             ts = datetime.fromtimestamp(int(entry["millisUTC"]) / 1000, tz=timezone.utc)
-            local_hour = (ts - timedelta(hours=5)).hour  # CDT approx; close enough for features
+            local_hour = (ts - timedelta(hours=5)).hour
             price = float(entry["price"])
             if local_hour not in buckets:
                 buckets[local_hour] = []
@@ -99,10 +94,7 @@ def fetch_comed_day(date) -> dict:
         except (KeyError, ValueError):
             continue
 
-    for h, prices in buckets.items():
-        hourly[h] = round(sum(prices) / len(prices), 4)
-
-    return hourly
+    return {h: round(sum(p) / len(p), 4) for h, p in buckets.items()}
 
 
 def fetch_weather_range(start: datetime, end: datetime) -> dict:
