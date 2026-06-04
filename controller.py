@@ -775,6 +775,14 @@ def main():
     daily = state.setdefault("daily_hours", {})
     daily[str(current_hour)] = hour_avg
     state["daily_hours"] = daily
+    # ML data collection — record one row per hour
+    try:
+        import sys
+        sys.path.insert(0, "/config/comed_ml")
+        from collect_data import record_hour
+        record_hour(hour_avg)
+    except Exception as e:
+        logging.warning(f"Data collection skipped: {e}")
 
     try:
         w              = get_weather()
