@@ -527,6 +527,7 @@ async function updateCounters() {
             document.getElementById("c-tesla-savings").textContent = "$" + (c.total_savings_tesla || 0).toFixed(2);
             const total = (c.total_savings_house || 0) + (c.total_savings_tesla || 0);
             document.getElementById("c-total-savings").textContent = "$" + total.toFixed(2);
+            document.getElementById("savings-today").textContent = "$" + total.toFixed(2);
         }
     } catch(e) {
         console.error("Counters fetch failed:", e);
@@ -568,12 +569,7 @@ async function update() {
         else                     rec = "🔴 Peak price! Avoid dishwasher, laundry, and heavy appliances.";
         document.getElementById("rec").textContent = rec;
 
-        const now = new Date();
-        const hoursElapsed = now.getHours() + now.getMinutes() / 60;
-        const estSavings = (FLAT - price.avg) / 100 * hoursElapsed * 1.5;
-        document.getElementById("savings-today").textContent =
-            (estSavings >= 0 ? "$" : "-$") + Math.abs(estSavings).toFixed(2);
-        document.getElementById("avg-today").textContent = price.avg.toFixed(2) + "¢/kWh";
+       document.getElementById("avg-today").textContent = price.avg.toFixed(2) + "¢/kWh";
     }
 
     document.getElementById("hours-beat").textContent = "-- / 24 hrs";
