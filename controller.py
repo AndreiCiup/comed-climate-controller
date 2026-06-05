@@ -349,9 +349,55 @@ def set_temperature(heat_c, cool_c):
                 raise
 
 # -- CAPACITY -----------------------------------------------------------------
+SAVINGS_HISTORY_FILE = "/config/www/savings_history.json"
+
+def snapshot_daily_savings():
+    """Called at midnight — saves today's savings contribution to history."""
+    try:
+        import json as _json
+        counters = load_counters()
+        total_now = round(
+            counters.get("total_savings_house", 0) +
+            counters.get("total_savings_tesla", 0), 2
+        )
+
+        # Load existing history
+        history = []
+        if os.path.exists(SAVINGS_HISTORY_FILE):
+            with open(SAVINGS_HISTORY_FILE, "r") as f:
+                data = _json.load(f)
+                history = data.get("daily", [])
+
+        # Today's contribution = total now minus last snapshot total
+        last_total = history[-1]["cumulative"] if history else 0.0
+        today_savings = round(max(0, total_now - last_total), 2)
+
+        yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+
+        # Add today's entry
+        history.append({
+            "date":       yesterday,
+            "house":      round(counters.get("total_savings_house", 0) - sum(d.get("house", 0) for d in history), 2),
+            "tesla":      round(counters.get("total_savings_tesla", 0) - sum(d.get("tesla", 0) for d in history), 2),
+            "total":      today_savings,
+            "cumulative": total_now
+        })
+
+        # Write back
+        with open(SAVINGS_HISTORY_FILE, "w") as f:
+            _json.dump({"daily": history}, f)
+
+        logging.info(f"Daily snapshot: ${today_savings:.2f} today, ${total_now:.2f} cumulative")
+    except Exception as e:
+        logging.error(f"Snapshot error: {e}")
 
 def check_capacity_day(state):
     now = datetime.now()
+    if now.hour == 0 and not state.get("daily_snapshot_done"):
+        snapshot_daily_savings()
+        state["daily_snapshot_done"] = True
+    if now.hour == 1:
+        state["daily_snapshot_done"] = False
     if now.hour == 0 and not state.get("capacity_day_checked"):
         f = analyze_tomorrow_weather()
         if f and f["capacity_day"] and now.month in CAPACITY_MONTHS:
