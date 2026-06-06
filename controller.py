@@ -14,9 +14,14 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
 # -- CONFIG -------------------------------------------------------------------
+try:
+    from secrets import HA_TOKEN, GMAIL_APP_PASSWORD
+except ImportError:
+    HA_TOKEN = ""
+    GMAIL_APP_PASSWORD = ""
 
 HA_URL          = "http://homeassistant.local:8123"
-HA_TOKEN        = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJiODY1NDg5NzRlZWY0N2Q3YTgzMTQ2YjNiMmJmNjMzOCIsImlhdCI6MTc3OTg0NDk5OCwiZXhwIjoyMDk1MjA0OTk4fQ.4s-vIvvkyRblukNoeLIYqx4qv32vPXg_LywB_j_qnxo"
+
 CLIMATE_ENTITY  = "climate.my_ecobee"
 
 # Tesla entities
@@ -36,7 +41,7 @@ TESLA_KWH_PER_PERCENT  = 0.83
 
 # Gmail
 GMAIL_USER    = "climatecontrol.pi@gmail.com"
-GMAIL_PASS    = "wgycqrdamokfywkk"
+
 NOTIFY_EMAILS = [
     "aciuperca.sdet@gmail.com",
     "g.crisu@yahoo.com"
