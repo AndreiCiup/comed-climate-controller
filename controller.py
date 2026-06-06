@@ -15,10 +15,12 @@ from email.mime.multipart import MIMEMultipart
 
 # -- CONFIG -------------------------------------------------------------------
 try:
-    from secrets import HA_TOKEN, GMAIL_APP_PASSWORD
+    from secrets import HA_TOKEN, GMAIL_APP_PASSWORD, GMAIL_USER, NOTIFY_EMAILS
 except ImportError:
-    HA_TOKEN = ""
+    HA_TOKEN          = ""
     GMAIL_APP_PASSWORD = ""
+    GMAIL_USER        = ""
+    NOTIFY_EMAILS     = []
 
 HA_URL          = "http://homeassistant.local:8123"
 
@@ -40,12 +42,13 @@ TESLA_PROTECT_END      = 19
 TESLA_KWH_PER_PERCENT  = 0.83
 
 # Gmail
-GMAIL_USER    = "climatecontrol.pi@gmail.com"
-
-NOTIFY_EMAILS = [
-    "aciuperca.sdet@gmail.com",
-    "g.crisu@yahoo.com"
-]
+try:
+    from secrets import HA_TOKEN, GMAIL_APP_PASSWORD, GMAIL_USER, NOTIFY_EMAILS
+except ImportError:
+    HA_TOKEN = ""
+    GMAIL_APP_PASSWORD = ""
+    GMAIL_USER = ""
+    NOTIFY_EMAILS = []
 
 # Baseline
 FLAT_RATE = 11.5
