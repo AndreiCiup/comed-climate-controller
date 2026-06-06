@@ -298,6 +298,23 @@ def should_precool():
         return False, None
     return f["expensive"] or f["very_expensive"], f
 
+def should_precool_aggressive(hour_avg):
+    """
+    Aggressive pre-cooling — triggered when price is cheap AND tomorrow is hot.
+    Returns (should_precool, target_temp)
+    """
+    if hour_avg > 3.0:
+        return False, None
+    f = analyze_tomorrow_weather()
+    if not f:
+        return False, None
+    max_tomorrow = f.get("max_afternoon", 0)
+    if max_tomorrow > 30.0:
+        return True, 19.5   # very hot tomorrow + cheap now → 19.5°C
+    elif max_tomorrow > 25.0:
+        return True, 20.0   # hot tomorrow + cheap now → 20°C
+    return False, None
+
 # -- ECOBEE -------------------------------------------------------------------
 
 def get_ha_state():
@@ -943,19 +960,32 @@ def main():
         state["daily_report_sent"] = False
         state["daily_hours"]       = {}
 
-    # Pre-cool overnight
-    precool, forecast = should_precool()
-    if precool and is_sleep_time() and not is_capacity_day:
-        target_cool = 20.0 if forecast["very_expensive"] else 21.0
-        set_temperature(DYNAMIC_HEAT, target_cool)
-        logging.info(f"Pre-cooling for tomorrow: {target_cool}C")
-        counters = load_counters()
-        counters["precool_triggered"] += 1
-        save_counters(counters)
-        state["last_cool_setpoint"]     = target_cool
-        state["last_thermostat_update"] = time.time()
-        save_state(state)
-        return
+    # Pre-cool overnight — aggressive mode when price is cheap
+    if is_sleep_time() and not is_capacity_day:
+        aggressive, aggressive_target = should_precool_aggressive(hour_avg)
+        if aggressive:
+            set_temperature(DYNAMIC_HEAT, aggressive_target)
+            logging.info(f"Aggressive pre-cool: {aggressive_target}C (price: {hour_avg:.2f}c)")
+            counters = load_counters()
+            counters["precool_triggered"] += 1
+            save_counters(counters)
+            state["last_cool_setpoint"]     = aggressive_target
+            state["last_thermostat_update"] = time.time()
+            save_state(state)
+            return
+        else:
+            precool, forecast = should_precool()
+            if precool:
+                target_cool = 20.0 if forecast["very_expensive"] else 21.0
+                set_temperature(DYNAMIC_HEAT, target_cool)
+                logging.info(f"Pre-cooling for tomorrow: {target_cool}C")
+                counters = load_counters()
+                counters["precool_triggered"] += 1
+                save_counters(counters)
+                state["last_cool_setpoint"]     = target_cool
+                state["last_thermostat_update"] = time.time()
+                save_state(state)
+                return
 
     # Dynamic thermostat
     try:
@@ -969,7 +999,9 @@ def main():
                 state["last_thermostat_update"] = time.time()
                 logging.info("Away mode active")
 
-        elif is_capacity_peak or is_capacity_day:
+        elif is_capacity_peak:
+            target_cool  = 23.5
+        elif is_capacity_day and now.hour >= 12 and now.hour < 19:
             target_cool  = 23.5
             current_cool = state.get("last_cool_setpoint", 23.5)
             if abs(current_cool - target_cool) > 0.1 and mins_since_update >= THERMOSTAT_UPDATE_MINS:
