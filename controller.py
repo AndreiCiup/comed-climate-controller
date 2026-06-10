@@ -41,14 +41,6 @@ TESLA_PROTECT_START    = 12
 TESLA_PROTECT_END      = 19
 TESLA_KWH_PER_PERCENT  = 0.83
 
-# Gmail
-try:
-    from secrets import HA_TOKEN, GMAIL_APP_PASSWORD, GMAIL_USER, NOTIFY_EMAILS
-except ImportError:
-    HA_TOKEN = ""
-    GMAIL_APP_PASSWORD = ""
-    GMAIL_USER = ""
-    NOTIFY_EMAILS = []
 
 # Baseline
 FLAT_RATE = 11.5
