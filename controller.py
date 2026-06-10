@@ -15,7 +15,7 @@ from email.mime.multipart import MIMEMultipart
 
 # -- CONFIG -------------------------------------------------------------------
 try:
-    from secrets import HA_TOKEN, GMAIL_APP_PASSWORD, GMAIL_USER, NOTIFY_EMAILS
+    from secrets import HA_TOKEN, GMAIL_APP_PASSWORD as GMAIL_PASS, GMAIL_USER, NOTIFY_EMAILS
 except ImportError:
     HA_TOKEN          = ""
     GMAIL_APP_PASSWORD = ""
