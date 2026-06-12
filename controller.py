@@ -368,7 +368,7 @@ def set_temperature(heat_c, cool_c):
             r.raise_for_status()
             logging.info(f"Set temps -> heat: {heat_c}C ({heat_f}F), cool: {cool_c}C ({cool_f}F)")
             return
-    except Exception as e:
+        except Exception as e:
             if attempt == 0:
                 logging.warning(f"Set temp failed, retrying: {e}")
                 time.sleep(5)
