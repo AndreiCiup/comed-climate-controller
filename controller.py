@@ -347,6 +347,18 @@ def set_temperature(heat_c, cool_c):
             "target_temp_high": cool_f,
             "target_temp_low":  heat_f
         }
+
+    # Force a temp hold so Ecobee doesn't override with its own schedule
+    try:
+        requests.post(
+            f"{HA_URL}/api/services/climate/set_preset_mode",
+            headers=headers,
+            json={"entity_id": CLIMATE_ENTITY, "preset_mode": "temp"},
+            timeout=30
+        )
+    except Exception as e:
+        logging.warning(f"Preset hold failed: {e}")
+
     for attempt in range(2):
         try:
             r = requests.post(
@@ -358,11 +370,6 @@ def set_temperature(heat_c, cool_c):
             return
         except Exception as e:
             if attempt == 0:
-                logging.warning(f"Set temp failed, retrying: {e}")
-                time.sleep(15)
-            else:
-                logging.error(f"Set temp failed twice: {e}")
-                raise
 
 # -- CAPACITY -----------------------------------------------------------------
 SAVINGS_HISTORY_FILE = "/config/www/savings_history.json"
@@ -500,7 +507,9 @@ def get_tesla_state():
     r_chg.raise_for_status()
     charging_state = r_chg.json()["state"]
 
-    plugged_in = location == "home" and charging_state.lower() != "disconnected"
+    # unknown/unknown = Tesla asleep at home — treat as plugged in
+    asleep_at_home = location == "unknown" and charging_state.lower() == "unknown"
+    plugged_in = (location == "home" and charging_state.lower() != "disconnected") or asleep_at_home
     logging.info(f"Location: {location} | Charging: {charging_state} | Plugged in: {plugged_in}")
 
     if not plugged_in:
