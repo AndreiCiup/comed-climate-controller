@@ -1022,9 +1022,14 @@ def main():
         else:
             sleep        = is_sleep_time()
             target_cool  = get_dynamic_cool(hour_avg, sleep)
-            current_cool = state.get("last_cool_setpoint", 23.5)
-            diff         = abs(current_cool - target_cool)
-
+            # Read actual setpoint from Ecobee — it may have overridden our last setting
+            try:
+                actual_cool_f = ha_state["attributes"].get("temperature") or \
+                                ha_state["attributes"].get("target_temp_high")
+                current_cool = round((float(actual_cool_f) - 32) * 5/9, 1) if actual_cool_f else state.get("last_cool_setpoint", 23.5)
+            except:
+                current_cool = state.get("last_cool_setpoint", 23.5)
+            diff = abs(current_cool - target_cool)
             if diff > 0.1 and mins_since_update >= THERMOSTAT_UPDATE_MINS:
                 new_cool = smooth_setpoint(current_cool, target_cool)
                 set_temperature(DYNAMIC_HEAT, new_cool)
@@ -1037,6 +1042,12 @@ def main():
                     counters["thermostat_raised"] += 1
                 save_counters(counters)
                 logging.info(f"Dynamic setpoint: {new_cool}C (target: {target_cool}C, price: {hour_avg:.2f}c)")
+            elif mins_since_update >= 30:
+                # Re-assert every 30 min — Ecobee may have reverted to its schedule
+                set_temperature(DYNAMIC_HEAT, target_cool)
+                state["last_cool_setpoint"]     = target_cool
+                state["last_thermostat_update"] = time.time()
+                logging.info(f"Re-asserting setpoint: {target_cool}C (price: {hour_avg:.2f}c)")
 
     except Exception as e:
         logging.error(f"Thermostat error: {e}")
