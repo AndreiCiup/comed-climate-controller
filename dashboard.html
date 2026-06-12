@@ -658,22 +658,34 @@
       async function getComEdHourlyToday() {
         try {
           const r = await fetch(
-            "https://hourlypricing.comed.com/api?type=houraverage",
+            "https://hourlypricing.comed.com/api?type=5minutefeed",
           );
           const data = await r.json();
-          // Safari-safe YYYY-MM-DD comparison using local date parts
           const now = new Date();
-          const todayY = now.getFullYear();
-          const todayM = now.getMonth();
-          const todayD = now.getDate();
-          return data.filter((d) => {
+
+          // Group 5-min readings into completed hours for today only
+          const byHour = {};
+          data.forEach((d) => {
             const dt = new Date(parseInt(d.millisUTC));
-            return (
-              dt.getFullYear() === todayY &&
-              dt.getMonth() === todayM &&
-              dt.getDate() === todayD
-            );
+            // Same day check (Safari-safe)
+            if (
+              dt.getFullYear() !== now.getFullYear() ||
+              dt.getMonth() !== now.getMonth() ||
+              dt.getDate() !== now.getDate()
+            )
+              return;
+            const h = dt.getHours();
+            // Only include hours that are fully completed (not the current hour)
+            if (h >= now.getHours()) return;
+            if (!byHour[h]) byHour[h] = [];
+            byHour[h].push(parseFloat(d.price));
           });
+
+          // Return one entry per completed hour with the average price
+          return Object.entries(byHour).map(([hour, prices]) => ({
+            hour: parseInt(hour),
+            price: prices.reduce((a, b) => a + b, 0) / prices.length,
+          }));
         } catch (e) {
           return [];
         }
