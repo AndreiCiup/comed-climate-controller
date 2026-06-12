@@ -178,6 +178,11 @@
         color: #00cc66;
         margin-bottom: 2px;
       }
+      .savings-sub {
+        font-size: 0.72rem;
+        color: #444;
+        margin-bottom: 6px;
+      }
       .section-title {
         font-size: 0.7rem;
         color: #555;
@@ -290,10 +295,11 @@
         </div>
       </div>
 
-      <!-- SAVINGS -->
+      <!-- TODAY'S SAVINGS -->
       <div class="card">
         <div class="card-title">Today's Savings</div>
         <div class="savings-big" id="savings-today">$--</div>
+        <div class="savings-sub" id="savings-today-sub">since midnight</div>
         <div class="stat-row">
           <span class="stat-label">Avg price</span>
           <span class="stat-value" id="avg-today">--</span>
@@ -350,6 +356,7 @@
           </div>
         </div>
       </div>
+
       <!-- TESLA -->
       <div class="card full">
         <div class="card-title">Lady T 🚗</div>
@@ -410,6 +417,7 @@
         <div class="card-title">Today's Price Chart</div>
         <canvas id="chart"></canvas>
       </div>
+
       <!-- PREDICTED PRICES -->
       <div class="card full" id="pred-card" style="display: none">
         <div class="card-title">
@@ -566,7 +574,7 @@
         >
           <span style="color: #555">Per day vs flat rate 11.5¢/kWh</span>
           <span style="color: #00cc66"
-            >Cumulative: <strong id="savings-cumulative">--</strong></span
+            >All-time: <strong id="savings-cumulative">--</strong></span
           >
         </div>
       </div>
@@ -744,10 +752,12 @@
               "$" + (c.total_savings_tesla || 0).toFixed(2);
             const total =
               (c.total_savings_house || 0) + (c.total_savings_tesla || 0);
+            // c-total-savings is the all-time cumulative in the Activity card — correct as-is
             document.getElementById("c-total-savings").textContent =
               "$" + total.toFixed(2);
-            document.getElementById("savings-today").textContent =
-              "$" + total.toFixed(2);
+            // savings-today is now computed in updateSavingsHistory() as today's delta
+            // Store running total on window so updateSavingsHistory can read it without a second fetch
+            window._runningTotal = total;
           }
         } catch (e) {
           console.error("Counters fetch failed:", e);
@@ -1019,6 +1029,7 @@
           });
         }
       }
+
       let predChart = null;
 
       async function updatePredictions() {
@@ -1027,17 +1038,14 @@
           if (!r.ok) return;
           const p = await r.json();
 
-          // Show the card
           document.getElementById("pred-card").style.display = "block";
           document.getElementById("pred-tomorrow-box").style.display = "block";
 
-          // Accuracy badge
           if (p.model_mae) {
             document.getElementById("pred-accuracy").textContent =
               "±" + p.model_mae + "¢ accuracy";
           }
 
-          // Summary boxes
           document.getElementById("pred-charging").textContent =
             p.best_charging_window || "--";
           document.getElementById("pred-peaks").textContent =
@@ -1047,7 +1055,6 @@
           document.getElementById("pred-rec").textContent =
             p.recommendation || "--";
 
-          // Tomorrow summary in weather card
           const maxPred = p.predictions
             ? Math.max(...p.predictions.map((x) => x.predicted_price))
             : null;
@@ -1063,7 +1070,6 @@
               "¢";
           }
 
-          // Predicted price chart
           if (!p.predictions || !p.predictions.length) return;
           const labels = p.predictions.map((x) => x.hour + ":00");
           const prices = p.predictions.map((x) => x.predicted_price);
@@ -1130,17 +1136,29 @@
             const dt = new Date(d.date);
             return dt.getMonth() + 1 + "/" + dt.getDate();
           });
-          const totals = data.daily.map((d) => d.total);
+
+          // Per-day delta — already stored correctly as d.total in snapshot_daily_savings()
+          const dailyAmounts = data.daily.map((d) => d.total);
           const cumulative = data.daily.map((d) => d.cumulative);
 
-          // Update cumulative total
-          const lastCumulative = cumulative[cumulative.length - 1];
+          // ── TODAY'S SAVINGS ────────────────────────────────────────────
+          // today's delta = live running total minus last midnight snapshot
+          const runningTotal = window._runningTotal || 0;
+          const lastSnapshot = cumulative[cumulative.length - 1] || 0;
+          const todaySoFar = Math.max(0, runningTotal - lastSnapshot);
+          document.getElementById("savings-today").textContent =
+            "$" + todaySoFar.toFixed(2);
+          document.getElementById("savings-today-sub").textContent =
+            "since midnight · all-time $" + runningTotal.toFixed(2);
+          // ──────────────────────────────────────────────────────────────
+
+          // All-time total shown under history chart
           document.getElementById("savings-cumulative").textContent =
-            "$" + lastCumulative.toFixed(2);
+            "$" + runningTotal.toFixed(2);
 
           if (savingsChart) {
             savingsChart.data.labels = labels;
-            savingsChart.data.datasets[0].data = totals;
+            savingsChart.data.datasets[0].data = dailyAmounts;
             savingsChart.data.datasets[1].data = cumulative;
             savingsChart.update();
           } else {
@@ -1153,8 +1171,8 @@
                 labels,
                 datasets: [
                   {
-                    label: "Daily savings",
-                    data: totals,
+                    label: "Daily savings ($)",
+                    data: dailyAmounts,
                     backgroundColor: "#00cc6688",
                     borderColor: "#00cc66",
                     borderWidth: 1,
@@ -1162,7 +1180,7 @@
                     yAxisID: "y",
                   },
                   {
-                    label: "Cumulative",
+                    label: "Cumulative ($)",
                     data: cumulative,
                     type: "line",
                     borderColor: "#ffaa00",
@@ -1214,19 +1232,27 @@
         }
       }
 
-      update();
-      updateChart();
-      updateCounters();
-      updatePredictions();
-      updateSavingsHistory();
-      updateThermoPro();
-      setInterval(updateThermoPro, 60000);
-      setInterval(updateSavingsHistory, 300000);
-      setInterval(updatePredictions, 300000);
+      // Load order matters: counters first so _runningTotal is set before savings history reads it
+      async function init() {
+        await updateCounters();
+        await updateSavingsHistory();
+        update();
+        updateChart();
+        updatePredictions();
+        updateThermoPro();
+      }
+
+      init();
+
+      setInterval(async () => {
+        await updateCounters();
+        await updateSavingsHistory();
+      }, 60000);
 
       setInterval(update, 60000);
       setInterval(updateChart, 300000);
-      setInterval(updateCounters, 60000);
+      setInterval(updatePredictions, 300000);
+      setInterval(updateThermoPro, 60000);
     </script>
   </body>
 </html>
