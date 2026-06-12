@@ -640,7 +640,8 @@ def handle_tesla_charging(hour_avg, state, is_capacity_peak, is_capacity_day):
 
         if battery is None:
             if hour_avg <= TESLA_CHARGE_PRICE and not is_capacity_day and not is_capacity_peak:
-                if state.get("tesla_wake_hour") == now_hour:
+                # Bypass hourly limit when price is negative — wake every cycle
+                if hour_avg >= 0 and state.get("tesla_wake_hour") == now_hour:
                     logging.info("Already attempted wake this hour - skipping")
                     return state
                 state["tesla_wake_hour"] = now_hour
