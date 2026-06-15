@@ -855,6 +855,7 @@
               todayEst;
             document.getElementById("c-total-savings").textContent =
               "$" + total.toFixed(2);
+            window._allTimeSavings = total;
           }
         } catch (e) {
           console.error("Counters fetch failed:", e);
@@ -1248,12 +1249,15 @@
 
           // Cumulative line: history cumulative values + (last cumulative + today estimate)
           const cumulative = data.daily.map((d) => d.cumulative);
-          const lastCumulative = cumulative[cumulative.length - 1] || 0;
-          const allCumulative = [...cumulative, lastCumulative + todayEstimate];
+          const allTimeTotal =
+            window._allTimeSavings !== undefined
+              ? window._allTimeSavings
+              : (cumulative[cumulative.length - 1] || 0) + todayEstimate;
+          const allCumulative = [...cumulative, allTimeTotal];
 
-          // All-time shown under chart = last confirmed + today estimate
+          // All-time shown under chart = same total as "Total saved" card
           document.getElementById("savings-cumulative").textContent =
-            "$" + (lastCumulative + todayEstimate).toFixed(2);
+            "$" + allTimeTotal.toFixed(2);
 
           if (savingsChart) {
             savingsChart.data.labels = allLabels;
@@ -1361,9 +1365,9 @@
 
       async function init() {
         await update(); // fetches weather + today's savings estimate
-        updateCounters();
+        await updateCounters(); // sets _allTimeSavings, used by updateSavingsHistory
         updateChart();
-        updateSavingsHistory(); // reads _todayEstimate set by updateTodaySavings inside update()
+        updateSavingsHistory();
         updatePredictions();
         updateThermoPro();
       }
@@ -1372,7 +1376,7 @@
 
       setInterval(async () => {
         await update();
-        updateCounters();
+        await updateCounters();
         updateSavingsHistory();
       }, 60000);
 
