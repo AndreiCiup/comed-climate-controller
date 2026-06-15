@@ -842,6 +842,8 @@
               c.tesla_stopped_full || 0;
             document.getElementById("c-peaks").textContent =
               c.capacity_peaks || 0;
+            document.getElementById("cap-peaks").textContent =
+              (c.capacity_peaks || 0) + " this month";
             const todayEst = window._todayEstimate || 0;
             document.getElementById("c-house-savings").textContent =
               "$" + ((c.total_savings_house || 0) + todayEst).toFixed(2);
@@ -976,9 +978,6 @@
               "🔴 Peak price! Avoid dishwasher, laundry, and heavy appliances.";
           document.getElementById("rec").textContent = rec;
         }
-
-        document.getElementById("cap-peaks").textContent =
-          (c.capacity_peaks || 0) + " this month";
 
         const ecobee = await getEntity("climate.my_ecobee");
         if (ecobee) {
