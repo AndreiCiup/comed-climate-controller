@@ -819,7 +819,7 @@
 
       async function updateCounters() {
         try {
-          const r = await fetch("/local/counters.json");
+          const r = await fetch("/local/counters.json", { cache: "no-store" });
           if (r.ok) {
             const c = await r.json();
             document.getElementById("start-date").textContent =
@@ -1129,7 +1129,7 @@
 
       async function updatePredictions() {
         try {
-          const r = await fetch("/local/predictions.json");
+          const r = await fetch("/local/predictions.json", { cache: "no-store" });
           if (!r.ok) return;
           const p = await r.json();
 
@@ -1217,7 +1217,7 @@
 
       async function updateSavingsHistory() {
         try {
-          const r = await fetch("/local/savings_history.json");
+          const r = await fetch("/local/savings_history.json", { cache: "no-store" });
           if (!r.ok) return;
           const data = await r.json();
           if (!data.daily || !data.daily.length) return;

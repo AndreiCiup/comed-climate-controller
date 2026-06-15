@@ -393,17 +393,24 @@ def snapshot_daily_savings():
         )
 
         # Load existing history
+       # Load existing history
         history = []
         if os.path.exists(SAVINGS_HISTORY_FILE):
             with open(SAVINGS_HISTORY_FILE, "r") as f:
                 data = _json.load(f)
                 history = data.get("daily", [])
 
+        yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+
+        # Idempotency guard — skip if already snapshotted for this date
+        # (handles overlapping controller processes near midnight)
+        if history and history[-1]["date"] == yesterday:
+            logging.info(f"Snapshot for {yesterday} already exists - skipping duplicate")
+            return
+
         # Today's contribution = total now minus last snapshot total
         last_total = history[-1]["cumulative"] if history else 0.0
         today_savings = round(max(0, total_now - last_total), 2)
-
-        yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
 
         # Add today's entry
         history.append({
