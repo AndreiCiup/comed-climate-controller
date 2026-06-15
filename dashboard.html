@@ -523,6 +523,10 @@
               <span class="stat-label">⏹ Stopped (capacity)</span
               ><span class="stat-value red" id="c-capacity-stop">--</span>
             </div>
+            <div class="stat-row">
+              <span class="stat-label">⏹ Stopped (full)</span
+              ><span class="stat-value" id="c-full">--</span>
+            </div>
           </div>
           <div>
             <div class="section-title">💰 All-Time Savings</div>
@@ -834,14 +838,19 @@
               c.tesla_stopped_protected || 0;
             document.getElementById("c-capacity-stop").textContent =
               c.tesla_stopped_capacity || 0;
+            document.getElementById("c-full").textContent =
+              c.tesla_stopped_full || 0;
             document.getElementById("c-peaks").textContent =
               c.capacity_peaks || 0;
+            const todayEst = window._todayEstimate || 0;
             document.getElementById("c-house-savings").textContent =
-              "$" + (c.total_savings_house || 0).toFixed(2);
+              "$" + ((c.total_savings_house || 0) + todayEst).toFixed(2);
             document.getElementById("c-tesla-savings").textContent =
               "$" + (c.total_savings_tesla || 0).toFixed(2);
             const total =
-              (c.total_savings_house || 0) + (c.total_savings_tesla || 0);
+              (c.total_savings_house || 0) +
+              (c.total_savings_tesla || 0) +
+              todayEst;
             document.getElementById("c-total-savings").textContent =
               "$" + total.toFixed(2);
           }
@@ -968,7 +977,8 @@
           document.getElementById("rec").textContent = rec;
         }
 
-        document.getElementById("cap-peaks").textContent = "0 this month";
+        document.getElementById("cap-peaks").textContent =
+          (c.capacity_peaks || 0) + " this month";
 
         const ecobee = await getEntity("climate.my_ecobee");
         if (ecobee) {
@@ -1220,8 +1230,8 @@
           // otherwise format as M/D
           const labels = data.daily.map((d) => {
             if (d.label) return d.label;
-            const dt = new Date(d.date);
-            return dt.getMonth() + 1 + "/" + dt.getDate();
+            const [, m, dd] = d.date.split("-").map(Number);
+            return m + "/" + dd;
           });
 
           // Per-day delta — stored as d.total in snapshot_daily_savings()

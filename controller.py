@@ -143,7 +143,9 @@ def save_state(state):
 def load_counters():
     try:
         with open(COUNTERS_FILE, "r") as f:
-            return json.load(f)
+            counters = json.load(f)
+            counters.setdefault("tesla_stopped_full", 0)
+            return counters
     except:
         return {
             "start_date":              datetime.now().strftime("%Y-%m-%d"),
@@ -153,6 +155,7 @@ def load_counters():
             "tesla_stopped_spike":     0,
             "tesla_stopped_protected": 0,
             "tesla_stopped_capacity":  0,
+            "tesla_stopped_full":      0,
             "capacity_peaks":          0,
             "precool_triggered":       0,
             "total_savings_house":     0.0,
@@ -608,7 +611,9 @@ def set_tesla_charging(enable, reason=""):
         counters["tesla_started"] += 1
     else:
         reason_lower = reason.lower()
-        if "spike" in reason_lower or "stop threshold" in reason_lower:
+        if "battery reached" in reason_lower:
+            counters["tesla_stopped_full"] += 1
+        elif "spike" in reason_lower or "stop threshold" in reason_lower:
             counters["tesla_stopped_spike"] += 1
         elif "capacity" in reason_lower:
             counters["tesla_stopped_capacity"] += 1
@@ -616,6 +621,7 @@ def set_tesla_charging(enable, reason=""):
             counters["tesla_stopped_protected"] += 1
         else:
             counters["tesla_stopped_spike"] += 1
+
     save_counters(counters)
 
 def handle_tesla_charging(hour_avg, state, is_capacity_peak, is_capacity_day):
