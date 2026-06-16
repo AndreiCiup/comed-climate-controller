@@ -21,6 +21,8 @@ import csv
 import requests
 import argparse
 from datetime import datetime
+from zoneinfo import ZoneInfo
+CHICAGO_TZ = ZoneInfo("America/Chicago")
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
@@ -79,7 +81,7 @@ def record_hour(price_cents: float) -> bool:
     """
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    now = datetime.now()
+    now = datetime.now(CHICAGO_TZ)
     ts_str = now.strftime("%Y-%m-%d %H:00")
 
     # Check if we already recorded this hour
