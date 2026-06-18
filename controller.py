@@ -91,6 +91,16 @@ THERMOSTAT_UPDATE_MINS = 20
 # Counters
 COUNTERS_FILE = "/config/comed_ecobee/counters.json"
 
+# ML price predictions — written by train_model.py / train_model.py --predict-only
+PREDICTIONS_FILE = "/config/www/predictions.json"
+
+# Minimum rows the model must have actually been trained on before controller.py
+# trusts its predictions for live thermostat decisions. Mirrors train_model.py's
+# MIN_ROWS. The dashboard chart has no such gate -- it displays whatever's in
+# predictions.json regardless of training_rows, so an early --force-trained
+# model can populate the chart immediately while still being ignored here.
+MIN_ROWS_FOR_PREDICTIVE_CONTROL = 1000
+
 logging.basicConfig(
     filename="/config/comed_ecobee/controller.log",
     level=logging.INFO,
@@ -287,7 +297,61 @@ def get_tonight_price_prediction():
     except:
         return None, "Forecast unavailable"
 
+def load_predictions_for_date(target_date_str):
+    """
+    Load ML hourly price predictions for a given date (YYYY-MM-DD) from
+    predictions.json, if present, for that date, AND trained on at least
+    MIN_ROWS_FOR_PREDICTIVE_CONTROL rows. That last check is what's gated —
+    the dashboard chart reads the same file with no such gate, so it can
+    show predictions from an early/forced model while controller.py still
+    waits for a properly-sized training run before acting on them.
+    Returns {hour: predicted_price} or None if any condition isn't met.
+    """
+    try:
+        if not os.path.exists(PREDICTIONS_FILE):
+            return None
+        with open(PREDICTIONS_FILE, "r") as f:
+            data = json.load(f)
+        if data.get("for_date") != target_date_str:
+            return None
+        if (data.get("training_rows") or 0) < MIN_ROWS_FOR_PREDICTIVE_CONTROL:
+            return None
+        return {p["hour"]: p["predicted_price"] for p in data.get("predictions", [])}
+    except Exception as e:
+        logging.warning(f"Could not load price predictions: {e}")
+        return None
+
+def get_predicted_tomorrow_prices():
+    """Convenience wrapper — ML predictions for tomorrow specifically."""
+    tomorrow_str = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+    return load_predictions_for_date(tomorrow_str)
+
 def should_precool():
+    """
+    Decide whether to pre-cool overnight in anticipation of an expensive
+    tomorrow. Prefers ML price predictions when available (reflects actual
+    grid pricing, not just temperature); falls back to the original
+    temperature-only heuristic when no model predictions exist yet —
+    e.g. before prices_weather.csv has reached the training threshold.
+    """
+    predicted = get_predicted_tomorrow_prices()
+    if predicted:
+        afternoon_prices = [predicted[h] for h in range(12, 19) if h in predicted]
+        if afternoon_prices:
+            max_afternoon_price = max(afternoon_prices)
+            f = analyze_tomorrow_weather() or {}
+            merged = {
+                "max_temp":            f.get("max_temp", 0.0),
+                "max_afternoon":       f.get("max_afternoon", 0.0),
+                "capacity_day":        f.get("capacity_day", False),
+                "expensive":           max_afternoon_price >= PRICE_NORMAL,
+                "very_expensive":      max_afternoon_price >= PRICE_HIGH,
+                "source":              "ml_prediction",
+                "max_afternoon_price": max_afternoon_price,
+            }
+            return (merged["expensive"] or merged["very_expensive"]), merged
+
+    # Fallback — no usable ML predictions yet, original heuristic, unchanged
     f = analyze_tomorrow_weather()
     if not f:
         return False, None
@@ -295,11 +359,28 @@ def should_precool():
 
 def should_precool_aggressive(hour_avg):
     """
-    Aggressive pre-cooling — triggered when price is cheap AND tomorrow is hot.
+    Aggressive pre-cooling — triggered when price is cheap right now AND
+    tomorrow looks expensive. Prefers ML price predictions for tomorrow
+    when available; falls back to the original temperature-only heuristic
+    otherwise. Target temps are unchanged either way (19.5/20.0) — ML only
+    changes WHEN we trigger, never how cold we go.
     Returns (should_precool, target_temp)
     """
     if hour_avg > 3.0:
         return False, None
+
+    predicted = get_predicted_tomorrow_prices()
+    if predicted:
+        afternoon_prices = [predicted[h] for h in range(12, 19) if h in predicted]
+        if afternoon_prices:
+            max_afternoon_price = max(afternoon_prices)
+            if max_afternoon_price >= PRICE_HIGH:
+                return True, 19.5
+            elif max_afternoon_price >= PRICE_NORMAL:
+                return True, 20.0
+            return False, None  # ML says tomorrow afternoon looks fine
+
+    # Fallback — no usable ML predictions yet, original heuristic, unchanged
     f = analyze_tomorrow_weather()
     if not f:
         return False, None
