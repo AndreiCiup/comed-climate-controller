@@ -1061,9 +1061,15 @@ def main():
         state["daily_hours"]       = {}
 
     # Pre-cool overnight — aggressive mode when price is cheap
-    if is_sleep_time() and not is_capacity_day:
+    # NEW
+    if is_sleep_time():
+        # On capacity days, pre-cooling overnight is actually optimal —
+        # bank cold air cheap before peak hours (12-7 PM). Price is the
+        # decisive factor, not the capacity flag. Only restrict during
+        # actual peak hours (handled below in the dynamic thermostat block).
         aggressive, aggressive_target = should_precool_aggressive(hour_avg)
         if aggressive:
+            # Price ≤ 3¢ + hot tomorrow → cool aggressively to 19.5–20°C
             set_temperature(DYNAMIC_HEAT, aggressive_target)
             logging.info(f"Aggressive pre-cool: {aggressive_target}C (price: {hour_avg:.2f}c)")
             counters = load_counters()
@@ -1073,7 +1079,8 @@ def main():
             state["last_thermostat_update"] = time.time()
             save_state(state)
             return
-        else:
+        elif hour_avg <= 6.0 and (not is_capacity_day):
+            # Standard precool on non-capacity days at reasonable prices
             precool, forecast = should_precool()
             if precool:
                 target_cool = 20.0 if forecast["very_expensive"] else 21.0
@@ -1086,6 +1093,18 @@ def main():
                 state["last_thermostat_update"] = time.time()
                 save_state(state)
                 return
+        elif hour_avg <= 6.0 and is_capacity_day:
+            # Capacity day + overnight price cheap → pre-cool aggressively
+            # regardless of aggressive threshold — peak hours are hours away
+            set_temperature(DYNAMIC_HEAT, 19.5)
+            logging.info(f"Capacity day pre-cool: 19.5C (price: {hour_avg:.2f}c ≤ 6.0c)")
+            counters = load_counters()
+            counters["precool_triggered"] += 1
+            save_counters(counters)
+            state["last_cool_setpoint"]     = 19.5
+            state["last_thermostat_update"] = time.time()
+            save_state(state)
+            return
 
     # Dynamic thermostat
     try:
