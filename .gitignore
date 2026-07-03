@@ -8,3 +8,4 @@ error.log
 *~
 secrets.py
 config/www/config.jscounters.json
+counters.json
