@@ -495,12 +495,15 @@ def snapshot_daily_savings():
         today_savings = round(max(0, total_now - last_total), 2)
 
         # Add today's entry
+        today_house = round(max(0, counters.get("total_savings_house", 0) - sum(d.get("house", 0) for d in history)), 2)
+        today_tesla = round(max(0, counters.get("total_savings_tesla", 0) - sum(d.get("tesla", 0) for d in history)), 2)
+        cumulative  = round(last_total + today_savings, 2)
         history.append({
             "date":       yesterday,
-            "house":      round(counters.get("total_savings_house", 0) - sum(d.get("house", 0) for d in history), 2),
-            "tesla":      round(counters.get("total_savings_tesla", 0) - sum(d.get("tesla", 0) for d in history), 2),
+            "house":      today_house,
+            "tesla":      today_tesla,
             "total":      today_savings,
-            "cumulative": total_now
+            "cumulative": cumulative
         })
 
         # Write back
