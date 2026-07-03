@@ -7,4 +7,4 @@ error.log
 *.log~
 *~
 secrets.py
-config/www/config.js
+config/www/config.jscounters.json
