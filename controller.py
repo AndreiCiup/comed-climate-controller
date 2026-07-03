@@ -1137,7 +1137,7 @@ def main():
 
         else:
             if hour_avg >= PRICE_EXTREME:
-                target_cool = 24.5
+                target_cool = 25.0
                 current_cool = state.get("last_cool_setpoint", 23.5)
                 if current_cool != target_cool and mins_since_update >= THERMOSTAT_UPDATE_MINS:
                     set_temperature(DYNAMIC_HEAT, target_cool)
@@ -1146,7 +1146,7 @@ def main():
                     counters = load_counters()
                     counters["thermostat_raised"] += 1
                     save_counters(counters)
-                    logging.info(f"Extreme price {hour_avg:.2f}c ≥ {PRICE_EXTREME}c — holding ceiling: {target_cool}C")
+                    logging.info(f"Extreme price {hour_avg:.2f}c ≥ {PRICE_EXTREME}c — holding ceiling: 25.0C")
                 return
             sleep        = is_sleep_time()
             target_cool  = get_dynamic_cool(hour_avg, sleep)
