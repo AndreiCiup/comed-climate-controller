@@ -53,6 +53,7 @@ PRICE_FREE   = 1.0
 PRICE_LOW    = 5.0
 PRICE_NORMAL = 9.0
 PRICE_HIGH   = 12.0
+PRICE_EXTREME = 15.0   
 
 # Capacity
 CAPACITY_MONTHS   = [6, 7, 8, 9]
@@ -1135,6 +1136,18 @@ def main():
                 logging.info(f"Capacity mode - holding baseline: {new_cool}C")
 
         else:
+            if hour_avg >= PRICE_EXTREME:
+                target_cool = 24.5
+                current_cool = state.get("last_cool_setpoint", 23.5)
+                if current_cool != target_cool and mins_since_update >= THERMOSTAT_UPDATE_MINS:
+                    set_temperature(DYNAMIC_HEAT, target_cool)
+                    state["last_cool_setpoint"]     = target_cool
+                    state["last_thermostat_update"] = time.time()
+                    counters = load_counters()
+                    counters["thermostat_raised"] += 1
+                    save_counters(counters)
+                    logging.info(f"Extreme price {hour_avg:.2f}c ≥ {PRICE_EXTREME}c — holding ceiling: {target_cool}C")
+                return
             sleep        = is_sleep_time()
             target_cool  = get_dynamic_cool(hour_avg, sleep)
             # Read actual setpoint from Ecobee — it may have overridden our last setting
