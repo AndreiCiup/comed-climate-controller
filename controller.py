@@ -48,6 +48,15 @@ FLAT_RATE = 11.5
 # Cat safety
 CAT_MAX_C = 25.0
 
+# Nursery comfort override -- manual switch (input_boolean.nursery_mode
+# in HA). When on, holds the master bedroom (ThermoPro sensor) below
+# NURSERY_MAX_C by cooling the whole house, regardless of price --
+# comfort wins over the pricing strategy while this is enabled.
+NURSERY_MODE_SWITCH = "input_boolean.nursery_mode"
+NURSERY_TEMP_SENSOR = "sensor.tp350s_434b_temperature"  # master bedroom ThermoPro
+NURSERY_MAX_C       = 23.5
+NURSERY_FLOOR_C     = 19.5  # never chase nursery comfort colder than this
+
 # Price thresholds
 PRICE_FREE   = 1.0
 PRICE_LOW    = 5.0
@@ -100,7 +109,7 @@ PREDICTIONS_FILE = "/config/www/predictions.json"
 # MIN_ROWS. The dashboard chart has no such gate -- it displays whatever's in
 # predictions.json regardless of training_rows, so an early --force-trained
 # model can populate the chart immediately while still being ignored here.
-MIN_ROWS_FOR_PREDICTIVE_CONTROL = 1000
+MIN_ROWS_FOR_PREDICTIVE_CONTROL = 900
 
 logging.basicConfig(
     filename="/config/comed_ecobee/controller.log",
@@ -156,6 +165,7 @@ def load_counters():
         with open(COUNTERS_FILE, "r") as f:
             counters = json.load(f)
             counters.setdefault("tesla_stopped_full", 0)
+            counters.setdefault("nursery_override_triggered", 0)
             return counters
     except:
         return {
@@ -167,6 +177,7 @@ def load_counters():
             "tesla_stopped_protected": 0,
             "tesla_stopped_capacity":  0,
             "tesla_stopped_full":      0,
+            "nursery_override_triggered": 0,
             "capacity_peaks":          0,
             "precool_triggered":       0,
             "total_savings_house":     0.0,
@@ -392,6 +403,57 @@ def should_precool_aggressive(hour_avg):
         return True, 20.0   # hot tomorrow + cheap now → 20°C
     return False, None
 
+
+def get_today_predictions():
+    """Load ML predictions for today (generated last night as 'tomorrow')."""
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    return load_predictions_for_date(today_str)
+
+
+def should_precool_intraday(hour_avg):
+    """
+    Intra-day pre-cooling: if a price spike is predicted in the next 2-4
+    hours AND current price is cheap enough to cool economically, drop the
+    setpoint now to bank cold air before the spike arrives.
+
+    Returns (should_precool, target_cool, reason) or (False, None, None).
+
+    Only fires during daytime (overnight logic handles sleep hours).
+    Does NOT fire if current price is already elevated — too late to
+    pre-cool cheaply, and the reactive logic handles expensive-now correctly.
+    """
+    if is_sleep_time():
+        return False, None, None
+
+    predicted = get_today_predictions()
+    if not predicted:
+        return False, None, None
+
+    current_hour = datetime.now().hour
+
+    # Look ahead 1-4 hours
+    upcoming_prices = [predicted[h] for h in range(current_hour + 1, min(current_hour + 5, 24))
+                       if h in predicted]
+
+    if not upcoming_prices:
+        return False, None, None
+
+    max_upcoming = max(upcoming_prices)
+
+    # Don't pre-cool if electricity is already expensive — savings are gone
+    if hour_avg >= PRICE_NORMAL:
+        return False, None, None
+
+    # Scale pre-cool target to predicted severity
+    if max_upcoming >= PRICE_EXTREME:
+        # Severe spike predicted — cool aggressively
+        return True, 22.0, f"Predicted spike {max_upcoming:.1f}c in next 4h"
+    elif max_upcoming >= PRICE_HIGH:
+        # Moderate spike predicted — cool moderately
+        return True, 22.5, f"Predicted high {max_upcoming:.1f}c in next 4h"
+
+    return False, None, None
+
 # -- ECOBEE -------------------------------------------------------------------
 
 def get_ha_state():
@@ -411,6 +473,29 @@ def get_ha_state():
             else:
                 logging.error(f"HA fetch failed twice: {e}")
                 raise
+
+def is_nursery_mode_on():
+    try:
+        headers = {"Authorization": f"Bearer {HA_TOKEN}"}
+        r = requests.get(f"{HA_URL}/api/states/{NURSERY_MODE_SWITCH}", headers=headers, timeout=15)
+        r.raise_for_status()
+        return r.json()["state"] == "on"
+    except Exception as e:
+        logging.warning(f"Could not read nursery mode switch: {e}")
+        return False
+
+def get_nursery_temp():
+    """Master bedroom ThermoPro reading, converted F -> C (sensor reports F,
+    same as the dashboard's fToC conversion)."""
+    try:
+        headers = {"Authorization": f"Bearer {HA_TOKEN}"}
+        r = requests.get(f"{HA_URL}/api/states/{NURSERY_TEMP_SENSOR}", headers=headers, timeout=15)
+        r.raise_for_status()
+        temp_f = float(r.json()["state"])
+        return round((temp_f - 32) * 5 / 9, 1)
+    except Exception as e:
+        logging.warning(f"Could not read nursery temp sensor: {e}")
+        return None
 
 def set_temperature(heat_c, cool_c):
     cool_c = min(cool_c, CAT_MAX_C)
@@ -716,6 +801,38 @@ def set_tesla_charging(enable, reason=""):
 
     save_counters(counters)
 
+def _open_tesla_segment(state, battery, price, kind):
+    """Start tracking a Tesla charging segment so we can credit savings
+    only for assistant-driven charging (not routine overnight charging
+    that would happen anyway)."""
+    state["tesla_segment_kind"]          = kind
+    state["tesla_segment_start_battery"] = battery
+    state["tesla_segment_prices"]        = [price]
+
+def _close_tesla_segment(state, battery_now):
+    """Settle the open Tesla charging segment (if any). Only credits
+    total_savings_tesla when the segment was assistant-driven (catching
+    a good price during the day, or resuming after a spike/capacity
+    stop at a good price) -- not for routine overnight charging, which
+    would happen at roughly this time regardless."""
+    kind          = state.get("tesla_segment_kind")
+    start_battery = state.get("tesla_segment_start_battery")
+    prices        = state.get("tesla_segment_prices") or []
+    if kind and start_battery is not None and battery_now is not None:
+        pct_charged = max(0, battery_now - start_battery)
+        kwh_charged = pct_charged * TESLA_KWH_PER_PERCENT
+        avg_price   = sum(prices) / len(prices) if prices else 0
+        if kind == "assistant" and kwh_charged > 0:
+            savings  = (FLAT_RATE - avg_price) / 100 * kwh_charged
+            counters = load_counters()
+            counters["total_savings_tesla"] = round(
+                counters.get("total_savings_tesla", 0) + max(0, savings), 2
+            )
+            save_counters(counters)
+    state["tesla_segment_kind"]          = None
+    state["tesla_segment_start_battery"] = None
+    state["tesla_segment_prices"]        = []
+
 def handle_tesla_charging(hour_avg, state, is_capacity_peak, is_capacity_day):
     try:
         if not should_check_tesla(hour_avg, state):
@@ -734,6 +851,8 @@ def handle_tesla_charging(hour_avg, state, is_capacity_peak, is_capacity_day):
 
         battery     = tesla["battery"]
         is_charging = tesla["switch"] == "on"
+        if state.get("tesla_segment_kind") and is_charging:
+            state.setdefault("tesla_segment_prices", []).append(hour_avg)
         now_hour    = datetime.now().hour
         capacity_day_peak = is_capacity_day and (12 <= now_hour < 18)
 
@@ -785,6 +904,7 @@ def handle_tesla_charging(hour_avg, state, is_capacity_peak, is_capacity_day):
             if is_charging:
                 reason = f"Battery reached {battery:.0f}%"
                 set_tesla_charging(False, reason)
+                _close_tesla_segment(state, battery)
                 state.setdefault("tesla_events", []).append({
                     "time": datetime.now().strftime("%I:%M %p"),
                     "action": "stopped", "reason": reason, "price": hour_avg
@@ -799,6 +919,7 @@ def handle_tesla_charging(hour_avg, state, is_capacity_peak, is_capacity_day):
             if is_charging:
                 reason = f"Capacity {'peak' if is_capacity_peak else 'day'} - price {hour_avg:.2f}c"
                 set_tesla_charging(False, reason)
+                _close_tesla_segment(state, battery)
                 state.setdefault("tesla_events", []).append({
                     "time": datetime.now().strftime("%I:%M %p"),
                     "action": "stopped", "reason": reason, "price": hour_avg
@@ -810,6 +931,7 @@ def handle_tesla_charging(hour_avg, state, is_capacity_peak, is_capacity_day):
             if not is_charging and battery < TESLA_MAX_BATTERY:
                 reason = f"Cheap price {hour_avg:.2f}c - always charge below {TESLA_CHARGE_PRICE}c"
                 set_tesla_charging(True, reason)
+                _open_tesla_segment(state, battery, hour_avg, "assistant")
                 state.setdefault("tesla_events", []).append({
                     "time": datetime.now().strftime("%I:%M %p"),
                     "action": "started", "reason": reason, "price": hour_avg
@@ -821,6 +943,7 @@ def handle_tesla_charging(hour_avg, state, is_capacity_peak, is_capacity_day):
             if is_charging:
                 reason = f"Price {hour_avg:.2f}c > stop threshold {stop_price}c"
                 set_tesla_charging(False, reason)
+                _close_tesla_segment(state, battery)
                 state.setdefault("tesla_events", []).append({
                     "time": datetime.now().strftime("%I:%M %p"),
                     "action": "stopped", "reason": reason, "price": hour_avg
@@ -832,6 +955,7 @@ def handle_tesla_charging(hour_avg, state, is_capacity_peak, is_capacity_day):
             if is_charging:
                 reason = f"Protected hours noon-7PM - price {hour_avg:.2f}c"
                 set_tesla_charging(False, reason)
+                _close_tesla_segment(state, battery)
                 state.setdefault("tesla_events", []).append({
                     "time": datetime.now().strftime("%I:%M %p"),
                     "action": "stopped", "reason": reason, "price": hour_avg
@@ -843,6 +967,7 @@ def handle_tesla_charging(hour_avg, state, is_capacity_peak, is_capacity_day):
             if not is_charging and battery < TESLA_MAX_BATTERY:
                 reason = f"Overnight window - price {hour_avg:.2f}c"
                 set_tesla_charging(True, reason)
+                _open_tesla_segment(state, battery, hour_avg, "baseline")
                 state.setdefault("tesla_events", []).append({
                     "time": datetime.now().strftime("%I:%M %p"),
                     "action": "started", "reason": reason, "price": hour_avg
@@ -880,7 +1005,6 @@ def send_morning_report(state):
         avg_price   = sum(o_prices) / len(o_prices) if o_prices else 0
         pct_charged = max(0, battery_now - start_batt)
         kwh_charged = pct_charged * TESLA_KWH_PER_PERCENT
-        savings     = (FLAT_RATE - avg_price) / 100 * kwh_charged
         pred_price, pred_note = get_tonight_price_prediction()
         events           = state.get("tesla_events", [])
         overnight_events = [e for e in events if _is_overnight_time(e["time"])]
@@ -899,17 +1023,13 @@ def send_morning_report(state):
                 d_section += f"  {e['time']} - Charging {e['action']}: {e['reason']}\n"
 
         counters = load_counters()
-        counters["total_savings_tesla"] = round(
-            counters.get("total_savings_tesla", 0) + max(0, savings), 2
-        )
-        save_counters(counters)
 
         send_email(
             f"Daily Charging Report - {datetime.now().strftime('%B %d')}",
             f"OVERNIGHT (12:00 AM - 6:00 AM):\n"
             f"Average price: {avg_price:.2f}c/kWh\n"
             f"vs flat rate:  {FLAT_RATE}c/kWh\n"
-            f"Savings:       ${savings:.2f}\n"
+            f"Tesla savings to date: ${counters.get('total_savings_tesla', 0):.2f}\n"
             f"{o_section}"
             f"\nBATTERY:\n"
             f"Started: {start_batt:.0f}%\n"
@@ -1065,6 +1185,27 @@ def main():
         state["daily_report_sent"] = False
         state["daily_hours"]       = {}
 
+    # Nursery comfort override -- manual switch. When on, holds the master
+    # bedroom below NURSERY_MAX_C by cooling the whole house. Checked before
+    # precool/price logic -- baby comfort takes priority over cost while on.
+    if is_nursery_mode_on():
+        nursery_temp = get_nursery_temp()
+        if nursery_temp is not None and nursery_temp > NURSERY_MAX_C:
+            current_cool      = state.get("last_cool_setpoint", 23.5)
+            mins_since_update = minutes_since(state.get("last_thermostat_update", 0))
+            target_cool       = max(NURSERY_FLOOR_C, current_cool - 1.0)
+            if target_cool < current_cool and mins_since_update >= THERMOSTAT_UPDATE_MINS:
+                new_cool = smooth_setpoint(current_cool, target_cool)
+                set_temperature(DYNAMIC_HEAT, new_cool)
+                logging.info(f"Nursery override: bedroom {nursery_temp:.1f}C > {NURSERY_MAX_C}C - cooling to {new_cool}C")
+                counters = load_counters()
+                counters["nursery_override_triggered"] = counters.get("nursery_override_triggered", 0) + 1
+                save_counters(counters)
+                state["last_cool_setpoint"]     = new_cool
+                state["last_thermostat_update"] = time.time()
+                save_state(state)
+                return
+
     # Pre-cool overnight — aggressive mode when price is cheap
     # NEW
     if is_sleep_time():
@@ -1110,6 +1251,26 @@ def main():
             state["last_thermostat_update"] = time.time()
             save_state(state)
             return
+
+    # Intra-day pre-cool — bank cold air before predicted price spikes.
+    # Only during daytime (overnight logic above handles sleep hours).
+    # Skipped on capacity days during peak hours — capacity logic takes priority.
+    if not is_sleep_time() and not (is_capacity_day and 12 <= current_hour < 19):
+        precool_now, precool_target, precool_reason = should_precool_intraday(hour_avg)
+        if precool_now:
+            current_cool = state.get("last_cool_setpoint", 23.5)
+            mins_since_update = minutes_since(state.get("last_thermostat_update", 0))
+            if current_cool > precool_target and mins_since_update >= THERMOSTAT_UPDATE_MINS:
+                new_cool = smooth_setpoint(current_cool, precool_target)
+                set_temperature(DYNAMIC_HEAT, new_cool)
+                logging.info(f"Intra-day pre-cool: {new_cool}C (target: {precool_target}C, {precool_reason}, price now: {hour_avg:.2f}c)")
+                counters = load_counters()
+                counters["precool_triggered"] += 1
+                save_counters(counters)
+                state["last_cool_setpoint"]     = new_cool
+                state["last_thermostat_update"] = time.time()
+                save_state(state)
+                return
 
     # Dynamic thermostat
     try:

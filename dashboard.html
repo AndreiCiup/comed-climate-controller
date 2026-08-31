@@ -352,6 +352,9 @@
             <div class="zone-humidity">
               Humidity: <span id="bedroom-humidity">--</span>
             </div>
+            <div class="zone-humidity">
+              Nursery mode: <span id="nursery-mode-status">--</span>
+            </div>
           </div>
         </div>
       </div>
@@ -905,6 +908,18 @@
           const color = h < 30 ? "#ff6600" : h < 60 ? "#00cc66" : "#6688ff";
           document.getElementById("bedroom-humidity").textContent = h + "%";
           document.getElementById("bedroom-humidity").style.color = color;
+        }
+
+        const nurseryMode = await getEntity("input_boolean.nursery_mode");
+        const nurseryEl = document.getElementById("nursery-mode-status");
+        if (nurseryMode && nurseryMode.state === "on") {
+          const bedroomC = bedroomTemp ? fToC(parseFloat(bedroomTemp.state)) : null;
+          const overLimit = bedroomC !== null && bedroomC > 23.5;
+          nurseryEl.textContent = overLimit ? "ON — cooling" : "ON";
+          nurseryEl.style.color = overLimit ? "#ff4400" : "#00cc66";
+        } else if (nurseryMode) {
+          nurseryEl.textContent = "OFF";
+          nurseryEl.style.color = "#555";
         }
       }
 
