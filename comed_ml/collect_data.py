@@ -18,6 +18,7 @@ Or standalone:
 
 import os
 import csv
+import shutil
 import requests
 import argparse
 from datetime import datetime
@@ -30,6 +31,9 @@ LAT         = 41.7421
 LON         = -88.2456
 OUTPUT_DIR  = "/config/comed_ml"
 OUTPUT_FILE = os.path.join(OUTPUT_DIR, "prices_weather.csv")
+# Also mirrored to /config/www so it is fetchable at /local/prices_weather.csv
+# (e.g. from a Mac on the same LAN) without needing Samba or SSH.
+WWW_COPY_FILE = "/config/www/prices_weather.csv"
 TRACKER_FILE = os.path.join(OUTPUT_DIR, "last_recorded_hour.txt")
 
 WEATHER_URL = "https://api.open-meteo.com/v1/forecast"
@@ -80,6 +84,15 @@ def record_hour(price_cents: float) -> bool:
     Returns True if a new row was written, False if already recorded this hour.
     """
     os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+    # Mirror to /config/www on every check-in (not just on a new hourly
+    # row) so a fresh copy is available quickly after deploy, without
+    # waiting up to an hour for the next new row.
+    if os.path.exists(OUTPUT_FILE):
+        try:
+            shutil.copy(OUTPUT_FILE, WWW_COPY_FILE)
+        except Exception as e:
+            print(f"[collect_data] www copy skipped: {e}")
 
     now = datetime.now(CHICAGO_TZ)
     ts_str = now.strftime("%Y-%m-%d %H:00")
