@@ -1,0 +1,51 @@
+{
+  "trained_at": "2026-08-31 16:52",
+  "training_rows": 985,
+  "features": [
+    "hour",
+    "hour_sin",
+    "hour_cos",
+    "day_of_week",
+    "month",
+    "is_weekend",
+    "temp_c",
+    "humidity",
+    "dewpoint_c",
+    "lag_168",
+    "roll_24_mean",
+    "roll_24_max",
+    "roll_168_mean"
+  ],
+  "mae_cents": 2.992,
+  "rmse_cents": 5.746,
+  "within_2c_pct": 65.0,
+  "top_features": [
+    [
+      "roll_24_mean",
+      0.357
+    ],
+    [
+      "temp_c",
+      0.309
+    ],
+    [
+      "roll_168_mean",
+      0.082
+    ],
+    [
+      "hour",
+      0.079
+    ],
+    [
+      "hour_cos",
+      0.04
+    ],
+    [
+      "hour_sin",
+      0.029
+    ]
+  ],
+  "n_estimators": 100,
+  "spike_recall": 0.5,
+  "band_accuracy": 46.2
+}

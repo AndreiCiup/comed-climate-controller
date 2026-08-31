@@ -1,0 +1,111 @@
+{
+  "generated_at": "2026-08-31 16:52",
+  "for_date": "2026-09-01",
+  "model_mae": 2.992,
+  "training_rows": 985,
+  "predictions": [
+    {
+      "hour": 0,
+      "predicted_price": 4.29
+    },
+    {
+      "hour": 1,
+      "predicted_price": 4.03
+    },
+    {
+      "hour": 2,
+      "predicted_price": 3.64
+    },
+    {
+      "hour": 3,
+      "predicted_price": 3.62
+    },
+    {
+      "hour": 4,
+      "predicted_price": 3.45
+    },
+    {
+      "hour": 5,
+      "predicted_price": 3.48
+    },
+    {
+      "hour": 6,
+      "predicted_price": 3.48
+    },
+    {
+      "hour": 7,
+      "predicted_price": 3.53
+    },
+    {
+      "hour": 8,
+      "predicted_price": 3.95
+    },
+    {
+      "hour": 9,
+      "predicted_price": 4.63
+    },
+    {
+      "hour": 10,
+      "predicted_price": 4.75
+    },
+    {
+      "hour": 11,
+      "predicted_price": 5.1
+    },
+    {
+      "hour": 12,
+      "predicted_price": 6.31
+    },
+    {
+      "hour": 13,
+      "predicted_price": 6.32
+    },
+    {
+      "hour": 14,
+      "predicted_price": 7.66
+    },
+    {
+      "hour": 15,
+      "predicted_price": 8.72
+    },
+    {
+      "hour": 16,
+      "predicted_price": 9.58
+    },
+    {
+      "hour": 17,
+      "predicted_price": 8.95
+    },
+    {
+      "hour": 18,
+      "predicted_price": 8.5
+    },
+    {
+      "hour": 19,
+      "predicted_price": 18.57
+    },
+    {
+      "hour": 20,
+      "predicted_price": 20.29
+    },
+    {
+      "hour": 21,
+      "predicted_price": 13.66
+    },
+    {
+      "hour": 22,
+      "predicted_price": 9.22
+    },
+    {
+      "hour": 23,
+      "predicted_price": 7.78
+    }
+  ],
+  "best_charging_window": "12 AM\u201311 AM (avg 3.9\u00a2)",
+  "peak_risk_hours": [
+    19,
+    20,
+    21
+  ],
+  "recommendation": "Avoid heavy appliance use 7 PM-10 PM. Best window: 12 AM\u201311 AM (avg 3.9\u00a2)."
+}
