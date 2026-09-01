@@ -6,6 +6,6 @@ pip3 install --quiet requests --break-system-packages 2>/dev/null
 
 # Run the controller every 5 minutes
 while true; do
-    /usr/bin/python3 /config/comed_ecobee/controller.py
+    timeout 240 /usr/bin/python3 /config/comed_ecobee/controller.py
     sleep 300
 done
