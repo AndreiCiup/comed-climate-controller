@@ -519,17 +519,6 @@ def set_temperature(heat_c, cool_c):
             "target_temp_low":  heat_f
         }
 
-    # Force a temp hold so Ecobee doesn't override with its own schedule
-    try:
-        requests.post(
-            f"{HA_URL}/api/services/climate/set_preset_mode",
-            headers=headers,
-            json={"entity_id": CLIMATE_ENTITY, "preset_mode": "temp"},
-            timeout=30
-        )
-    except Exception as e:
-        logging.warning(f"Preset hold failed: {e}")
-
     for attempt in range(2):
         try:
             r = requests.post(
