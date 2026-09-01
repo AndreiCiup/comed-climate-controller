@@ -22,7 +22,7 @@ except ImportError:
     GMAIL_USER        = ""
     NOTIFY_EMAILS     = []
 
-HA_URL          = "http://192.168.12.191:8123"
+HA_URL          = "http://192.168.12.191"
 
 CLIMATE_ENTITY  = "climate.my_ecobee"
 
