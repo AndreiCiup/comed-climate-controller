@@ -353,7 +353,22 @@
               Humidity: <span id="bedroom-humidity">--</span>
             </div>
             <div class="zone-humidity">
-              Nursery mode: <span id="nursery-mode-status">--</span>
+              Nursery mode:
+              <button
+                id="nursery-mode-status"
+                onclick="toggleNurseryMode()"
+                style="
+                  font: inherit;
+                  color: inherit;
+                  background: none;
+                  border: 1px solid currentColor;
+                  border-radius: 4px;
+                  padding: 1px 8px;
+                  cursor: pointer;
+                "
+              >
+                --
+              </button>
             </div>
           </div>
         </div>
@@ -863,6 +878,22 @@
         } catch (e) {
           console.error("Counters fetch failed:", e);
         }
+      }
+
+      async function toggleNurseryMode() {
+        const btn = document.getElementById("nursery-mode-status");
+        btn.disabled = true;
+        try {
+          await fetch(HA_URL + "/api/services/input_boolean/toggle", {
+            method: "POST",
+            headers: haHeaders(),
+            body: JSON.stringify({ entity_id: "input_boolean.nursery_mode" }),
+          });
+        } catch (e) {
+          console.error("Nursery mode toggle failed:", e);
+        }
+        await updateThermoPro();
+        btn.disabled = false;
       }
 
       async function updateThermoPro() {
