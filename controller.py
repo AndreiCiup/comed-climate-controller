@@ -10,6 +10,7 @@ import logging
 import smtplib
 import time
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import os
@@ -23,6 +24,11 @@ except ImportError:
     NOTIFY_EMAILS     = []
 
 HA_URL          = "http://192.168.12.191"
+
+# Container OS clock has been observed running ~2h off local wall time
+# (no tzdata installed on the Alpine base) -- always fetch time in an
+# explicit zone rather than trusting a naive local-time read.
+TZ              = ZoneInfo("America/Chicago")
 
 CLIMATE_ENTITY  = "climate.my_ecobee"
 
@@ -169,7 +175,7 @@ def load_counters():
             return counters
     except:
         return {
-            "start_date":              datetime.now().strftime("%Y-%m-%d"),
+            "start_date":              datetime.now(TZ).strftime("%Y-%m-%d"),
             "thermostat_cooled":       0,
             "thermostat_raised":       0,
             "tesla_started":           0,
@@ -197,10 +203,10 @@ def save_counters(counters):
 # -- HELPERS ------------------------------------------------------------------
 
 def is_sleep_time():
-    return datetime.now().hour >= 22 or datetime.now().hour < 6
+    return datetime.now(TZ).hour >= 22 or datetime.now(TZ).hour < 6
 
 def is_overnight_charging_window():
-    return 0 <= datetime.now().hour < 6
+    return 0 <= datetime.now(TZ).hour < 6
 
 def get_dynamic_cool(price, sleep=False):
     scale = DYNAMIC_COOL_SLEEP if sleep else DYNAMIC_COOL
@@ -283,7 +289,7 @@ def analyze_tomorrow_weather():
         return None
     times    = data["hourly"]["time"]
     temps    = data["hourly"]["temperature_2m"]
-    tomorrow = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+    tomorrow = (datetime.now(TZ) + timedelta(days=1)).strftime("%Y-%m-%d")
     t_temps  = [temps[i] for i, t in enumerate(times) if t.startswith(tomorrow)]
     if not t_temps:
         return None
@@ -335,7 +341,7 @@ def load_predictions_for_date(target_date_str):
 
 def get_predicted_tomorrow_prices():
     """Convenience wrapper — ML predictions for tomorrow specifically."""
-    tomorrow_str = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+    tomorrow_str = (datetime.now(TZ) + timedelta(days=1)).strftime("%Y-%m-%d")
     return load_predictions_for_date(tomorrow_str)
 
 def should_precool():
@@ -406,7 +412,7 @@ def should_precool_aggressive(hour_avg):
 
 def get_today_predictions():
     """Load ML predictions for today (generated last night as 'tomorrow')."""
-    today_str = datetime.now().strftime("%Y-%m-%d")
+    today_str = datetime.now(TZ).strftime("%Y-%m-%d")
     return load_predictions_for_date(today_str)
 
 
@@ -429,7 +435,7 @@ def should_precool_intraday(hour_avg):
     if not predicted:
         return False, None, None
 
-    current_hour = datetime.now().hour
+    current_hour = datetime.now(TZ).hour
 
     # Look ahead 1-4 hours
     upcoming_prices = [predicted[h] for h in range(current_hour + 1, min(current_hour + 5, 24))
@@ -556,7 +562,7 @@ def snapshot_daily_savings():
                 data = _json.load(f)
                 history = data.get("daily", [])
 
-        yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+        yesterday = (datetime.now(TZ) - timedelta(days=1)).strftime("%Y-%m-%d")
 
         # Idempotency guard — skip if already snapshotted for this date
         # (handles overlapping controller processes near midnight)
@@ -589,7 +595,7 @@ def snapshot_daily_savings():
         logging.error(f"Snapshot error: {e}")
 
 def check_capacity_day(state):
-    now = datetime.now()
+    now = datetime.now(TZ)
     if now.hour == 0 and not state.get("daily_snapshot_done"):
         snapshot_daily_savings()
         state["daily_snapshot_done"] = True
@@ -617,7 +623,7 @@ def check_capacity_day(state):
     return state
 
 def is_potential_peak_hour(price, hour_avg):
-    now = datetime.now()
+    now = datetime.now(TZ)
     if now.month not in CAPACITY_MONTHS: return False
     if now.hour not in CAPACITY_HOURS:   return False
     if now.weekday() >= 5:               return False
@@ -630,17 +636,17 @@ def is_potential_peak_hour(price, hour_avg):
     return hour_avg >= CAPACITY_PRICE
 
 def handle_capacity_peak(state, hour_avg, current_temp):
-    peak_key = f"peak_{datetime.now().strftime('%Y%m%d%H')}"
+    peak_key = f"peak_{datetime.now(TZ).strftime('%Y%m%d%H')}"
     if peak_key in state.get("capacity_peaks", {}):
         return state
     state.setdefault("capacity_peaks", {})[peak_key] = {
         "price": hour_avg, "temp": current_temp,
-        "time":  datetime.now().strftime("%Y-%m-%d %H:%M")
+        "time":  datetime.now(TZ).strftime("%Y-%m-%d %H:%M")
     }
-    this_month  = datetime.now().strftime("%Y%m")
+    this_month  = datetime.now(TZ).strftime("%Y%m")
     peaks_month = sum(1 for k in state["capacity_peaks"] if k.startswith(f"peak_{this_month}"))
     state.setdefault("tesla_events", []).append({
-        "time":   datetime.now().strftime("%I:%M %p"),
+        "time":   datetime.now(TZ).strftime("%I:%M %p"),
         "action": "stopped",
         "reason": f"Capacity peak - price {hour_avg:.2f}c, temp {current_temp:.1f}C",
         "price":  hour_avg
@@ -653,7 +659,7 @@ def handle_capacity_peak(state, hour_avg, current_temp):
     send_email(
         "Warning: Capacity Peak - Reduce Usage Now!",
         f"Price: {hour_avg:.2f}c/kWh | Temp: {current_temp:.1f}C\n"
-        f"Time: {datetime.now().strftime('%I:%M %p')}\n\n"
+        f"Time: {datetime.now(TZ).strftime('%I:%M %p')}\n\n"
         f"- Avoid dishwasher, laundry, oven\n"
         f"- Tesla charging stopped\n"
         f"- Thermostat held at baseline\n\n"
@@ -740,7 +746,7 @@ def wake_tesla():
         return False
 
 def should_check_tesla(hour_avg, state):
-    now             = datetime.now()
+    now             = datetime.now(TZ)
     hour            = now.hour
     minute          = now.minute
     last_avg        = state.get("last_hour_avg", 0.0)
@@ -827,8 +833,8 @@ def handle_tesla_charging(hour_avg, state, is_capacity_peak, is_capacity_day):
         if not should_check_tesla(hour_avg, state):
             return state
 
-        state["tesla_last_check_hour"] = datetime.now().hour
-        state["tesla_last_check_min"]  = datetime.now().minute
+        state["tesla_last_check_hour"] = datetime.now(TZ).hour
+        state["tesla_last_check_min"]  = datetime.now(TZ).minute
         state["last_hour_avg"]         = hour_avg
 
         tesla = get_tesla_state()
@@ -842,7 +848,7 @@ def handle_tesla_charging(hour_avg, state, is_capacity_peak, is_capacity_day):
         is_charging = tesla["switch"] == "on"
         if state.get("tesla_segment_kind") and is_charging:
             state.setdefault("tesla_segment_prices", []).append(hour_avg)
-        now_hour    = datetime.now().hour
+        now_hour    = datetime.now(TZ).hour
         capacity_day_peak = is_capacity_day and (12 <= now_hour < 18)
 
         if battery is None:
@@ -895,7 +901,7 @@ def handle_tesla_charging(hour_avg, state, is_capacity_peak, is_capacity_day):
                 set_tesla_charging(False, reason)
                 _close_tesla_segment(state, battery)
                 state.setdefault("tesla_events", []).append({
-                    "time": datetime.now().strftime("%I:%M %p"),
+                    "time": datetime.now(TZ).strftime("%I:%M %p"),
                     "action": "stopped", "reason": reason, "price": hour_avg
                 })
             return state
@@ -910,7 +916,7 @@ def handle_tesla_charging(hour_avg, state, is_capacity_peak, is_capacity_day):
                 set_tesla_charging(False, reason)
                 _close_tesla_segment(state, battery)
                 state.setdefault("tesla_events", []).append({
-                    "time": datetime.now().strftime("%I:%M %p"),
+                    "time": datetime.now(TZ).strftime("%I:%M %p"),
                     "action": "stopped", "reason": reason, "price": hour_avg
                 })
                 state["tesla_paused"] = True
@@ -922,7 +928,7 @@ def handle_tesla_charging(hour_avg, state, is_capacity_peak, is_capacity_day):
                 set_tesla_charging(True, reason)
                 _open_tesla_segment(state, battery, hour_avg, "assistant")
                 state.setdefault("tesla_events", []).append({
-                    "time": datetime.now().strftime("%I:%M %p"),
+                    "time": datetime.now(TZ).strftime("%I:%M %p"),
                     "action": "started", "reason": reason, "price": hour_avg
                 })
                 state["tesla_paused"] = False
@@ -934,7 +940,7 @@ def handle_tesla_charging(hour_avg, state, is_capacity_peak, is_capacity_day):
                 set_tesla_charging(False, reason)
                 _close_tesla_segment(state, battery)
                 state.setdefault("tesla_events", []).append({
-                    "time": datetime.now().strftime("%I:%M %p"),
+                    "time": datetime.now(TZ).strftime("%I:%M %p"),
                     "action": "stopped", "reason": reason, "price": hour_avg
                 })
                 state["tesla_paused"] = True
@@ -946,7 +952,7 @@ def handle_tesla_charging(hour_avg, state, is_capacity_peak, is_capacity_day):
                 set_tesla_charging(False, reason)
                 _close_tesla_segment(state, battery)
                 state.setdefault("tesla_events", []).append({
-                    "time": datetime.now().strftime("%I:%M %p"),
+                    "time": datetime.now(TZ).strftime("%I:%M %p"),
                     "action": "stopped", "reason": reason, "price": hour_avg
                 })
                 state["tesla_paused"] = True
@@ -958,7 +964,7 @@ def handle_tesla_charging(hour_avg, state, is_capacity_peak, is_capacity_day):
                 set_tesla_charging(True, reason)
                 _open_tesla_segment(state, battery, hour_avg, "baseline")
                 state.setdefault("tesla_events", []).append({
-                    "time": datetime.now().strftime("%I:%M %p"),
+                    "time": datetime.now(TZ).strftime("%I:%M %p"),
                     "action": "started", "reason": reason, "price": hour_avg
                 })
                 state["tesla_paused"] = False
@@ -1014,7 +1020,7 @@ def send_morning_report(state):
         counters = load_counters()
 
         send_email(
-            f"Daily Charging Report - {datetime.now().strftime('%B %d')}",
+            f"Daily Charging Report - {datetime.now(TZ).strftime('%B %d')}",
             f"OVERNIGHT (12:00 AM - 6:00 AM):\n"
             f"Average price: {avg_price:.2f}c/kWh\n"
             f"vs flat rate:  {FLAT_RATE}c/kWh\n"
@@ -1047,7 +1053,7 @@ def _is_overnight_time(time_str):
 # -- MAIN ---------------------------------------------------------------------
 
 def main():
-    now          = datetime.now()
+    now          = datetime.now(TZ)
     current_hour = now.hour
     state        = load_state()
 
