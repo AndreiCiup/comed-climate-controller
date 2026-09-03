@@ -3,6 +3,7 @@
 # Ensure Python and dependencies are installed on every boot
 apk add --quiet python3 py3-pip py3-numpy py3-pandas py3-scikit-learn tzdata 2>/dev/null
 pip3 install --quiet requests --break-system-packages 2>/dev/null
+pip3 install --quiet tzdata --break-system-packages 2>/dev/null  # fallback if apk tzdata failed to install
 
 # Run the controller every 5 minutes
 while true; do

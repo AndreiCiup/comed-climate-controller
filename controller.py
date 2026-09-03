@@ -27,8 +27,15 @@ HA_URL          = "http://192.168.12.191"
 
 # Container OS clock has been observed running ~2h off local wall time
 # (no tzdata installed on the Alpine base) -- always fetch time in an
-# explicit zone rather than trusting a naive local-time read.
-TZ              = ZoneInfo("America/Chicago")
+# explicit zone rather than trusting a naive local-time read. Falls back
+# to the old naive-local behavior (datetime.now(None) == datetime.now())
+# if tzdata is somehow still missing, so a provisioning hiccup degrades
+# to "2h off" again rather than crashing every cycle.
+try:
+    TZ = ZoneInfo("America/Chicago")
+except Exception:
+    logging.error("ZoneInfo('America/Chicago') unavailable -- tzdata not installed; falling back to naive local time")
+    TZ = None
 
 CLIMATE_ENTITY  = "climate.my_ecobee"
 
