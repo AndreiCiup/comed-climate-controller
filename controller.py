@@ -130,6 +130,16 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(message)s"
 )
 
+# logging's own %(asctime)s is stamped via Formatter.converter, which
+# defaults to time.localtime() -- a completely separate code path from
+# the datetime.now(TZ) calls above. Fixing TZ alone left every log line
+# still timestamped by the same broken OS-level local time. Point the
+# formatter's converter at TZ too so the log file itself reads correctly.
+if TZ is not None:
+    logging.Formatter.converter = staticmethod(
+        lambda timestamp, _tz=TZ: datetime.fromtimestamp(timestamp, _tz).timetuple()
+    )
+
 # -- HVAC SAVINGS -------------------------------------------------------------
 
 def get_hvac_kwh_per_hour(outdoor_temp_c):
