@@ -1322,12 +1322,12 @@ def main():
                 logging.info("Away mode active")
 
         elif is_capacity_peak:
-            # Was a dead branch -- set target_cool but never called
-            # set_temperature(), never logged, never saved state. Any
-            # price spike during a capacity peak silently left the
-            # Ecobee at whatever setpoint it already had. Mirror the
-            # is_capacity_day branch below so it actually applies.
-            target_cool  = 23.5
+            # 23.5C floor -- never chase a cheap price colder than this
+            # during a capacity peak (that's what would spike demand and
+            # risk the annual capacity tag). Above the floor, still climb
+            # with price using the same bands as normal hours (tops out
+            # at 25.0C for >=12c, same ceiling as PRICE_EXTREME below).
+            target_cool  = max(23.5, get_dynamic_cool(hour_avg, sleep=False))
             current_cool = state.get("last_cool_setpoint", 23.5)
             if abs(current_cool - target_cool) > 0.1 and mins_since_update >= THERMOSTAT_UPDATE_MINS:
                 new_cool = smooth_setpoint(current_cool, target_cool)
@@ -1339,7 +1339,8 @@ def main():
                 save_counters(counters)
                 logging.info(f"Capacity peak - holding baseline: {new_cool}C (price: {hour_avg:.2f}c)")
         elif is_capacity_day and now.hour >= 12 and now.hour < 19:
-            target_cool  = 23.5
+            # Same 23.5C floor + price-scaling-above-it as the peak branch.
+            target_cool  = max(23.5, get_dynamic_cool(hour_avg, sleep=False))
             current_cool = state.get("last_cool_setpoint", 23.5)
             if abs(current_cool - target_cool) > 0.1 and mins_since_update >= THERMOSTAT_UPDATE_MINS:
                 new_cool = smooth_setpoint(current_cool, target_cool)
@@ -1349,7 +1350,7 @@ def main():
                 counters = load_counters()
                 counters["thermostat_raised"] += 1
                 save_counters(counters)
-                logging.info(f"Capacity mode - holding baseline: {new_cool}C")
+                logging.info(f"Capacity mode - holding baseline: {new_cool}C (price: {hour_avg:.2f}c)")
 
         else:
             if hour_avg >= PRICE_EXTREME:
