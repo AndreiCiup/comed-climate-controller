@@ -71,9 +71,11 @@ NURSERY_MAX_C       = 23.5
 NURSERY_FLOOR_C     = 19.5  # never chase nursery comfort colder than this
 
 # Aggressive overnight pre-cool -- manual switch (input_boolean.aggressive_precool
-# in HA). Off by default: standard precool (should_precool()) runs instead.
-# When on, should_precool_aggressive()'s forecast-based trigger (cheap price now
-# + hot tomorrow -> cool to 19.5-20C) is allowed to fire. Stays on until you
+# in HA). Off by default: standard precool (should_precool(), 20-21C) runs
+# instead of BOTH of the two things that used to force 19.5C automatically --
+# should_precool_aggressive()'s forecast-based trigger (cheap price now + hot
+# tomorrow), and the capacity-day forced pre-cool (capacity day + overnight
+# price <=6c). When on, both are allowed to fire again. Stays on until you
 # manually turn it back off -- it does not auto-reset after triggering.
 AGGRESSIVE_PRECOOL_SWITCH = "input_boolean.aggressive_precool"
 
@@ -1242,8 +1244,9 @@ def main():
         # bank cold air cheap before peak hours (12-7 PM). Price is the
         # decisive factor, not the capacity flag. Only restrict during
         # actual peak hours (handled below in the dynamic thermostat block).
+        aggressive_precool_enabled = is_aggressive_precool_on()
         aggressive, aggressive_target = (False, None)
-        if is_aggressive_precool_on():
+        if aggressive_precool_enabled:
             aggressive, aggressive_target = should_precool_aggressive(hour_avg)
         if aggressive:
             # Price ≤ 3¢ + hot tomorrow → cool aggressively to 19.5–20°C
@@ -1256,8 +1259,9 @@ def main():
             state["last_thermostat_update"] = time.time()
             save_state(state)
             return
-        elif hour_avg <= 6.0 and (not is_capacity_day):
-            # Standard precool on non-capacity days at reasonable prices
+        elif hour_avg <= 6.0 and (not is_capacity_day or not aggressive_precool_enabled):
+            # Standard precool -- also used on capacity days when the
+            # aggressive toggle is off, instead of the 19.5C forced cool below
             precool, forecast = should_precool()
             if precool:
                 target_cool = 20.0 if forecast["very_expensive"] else 21.0
@@ -1271,6 +1275,8 @@ def main():
                 save_state(state)
                 return
         elif hour_avg <= 6.0 and is_capacity_day:
+            # Only reached when aggressive_precool_enabled is True (the
+            # branch above already claims capacity days when it's off).
             # Capacity day + overnight price cheap → pre-cool aggressively
             # regardless of aggressive threshold — peak hours are hours away
             set_temperature(DYNAMIC_HEAT, 19.5)
