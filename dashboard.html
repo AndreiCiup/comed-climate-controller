@@ -326,6 +326,24 @@
             <div class="zone-humidity" style="margin-bottom: 6px">
               Setpoint: <span id="setpoint">--</span>
             </div>
+            <div class="zone-humidity">
+              Aggressive precool:
+              <button
+                id="aggressive-precool-status"
+                onclick="toggleAggressivePrecool()"
+                style="
+                  font: inherit;
+                  color: inherit;
+                  background: none;
+                  border: 1px solid currentColor;
+                  border-radius: 4px;
+                  padding: 1px 8px;
+                  cursor: pointer;
+                "
+              >
+                --
+              </button>
+            </div>
             <div class="stat-row">
               <span class="stat-label">Mode</span
               ><span class="stat-value" id="hvac-mode">--</span>
@@ -896,6 +914,24 @@
         btn.disabled = false;
       }
 
+      async function toggleAggressivePrecool() {
+        const btn = document.getElementById("aggressive-precool-status");
+        btn.disabled = true;
+        try {
+          await fetch(HA_URL + "/api/services/input_boolean/toggle", {
+            method: "POST",
+            headers: haHeaders(),
+            body: JSON.stringify({
+              entity_id: "input_boolean.aggressive_precool",
+            }),
+          });
+        } catch (e) {
+          console.error("Aggressive precool toggle failed:", e);
+        }
+        await update();
+        btn.disabled = false;
+      }
+
       async function updateThermoPro() {
         const basementTemp = await getEntity("sensor.tp350s_0b0b_temperature");
         const basementHum = await getEntity("sensor.tp350s_0b0b_humidity");
@@ -1049,6 +1085,19 @@
             action;
           document.getElementById("preset").textContent =
             ecobee.attributes.preset_mode || "--";
+        }
+
+        const aggressivePrecool = await getEntity(
+          "input_boolean.aggressive_precool",
+        );
+        const aggressiveEl = document.getElementById(
+          "aggressive-precool-status",
+        );
+        if (aggressivePrecool) {
+          aggressiveEl.textContent =
+            aggressivePrecool.state === "on" ? "ON" : "OFF";
+          aggressiveEl.style.color =
+            aggressivePrecool.state === "on" ? "#00cc66" : "#555";
         }
 
         const tLoc = await getEntity("device_tracker.lady_t_location");

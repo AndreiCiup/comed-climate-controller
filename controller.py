@@ -70,6 +70,13 @@ NURSERY_TEMP_SENSOR = "sensor.tp350s_434b_temperature"  # master bedroom ThermoP
 NURSERY_MAX_C       = 23.5
 NURSERY_FLOOR_C     = 19.5  # never chase nursery comfort colder than this
 
+# Aggressive overnight pre-cool -- manual switch (input_boolean.aggressive_precool
+# in HA). Off by default: standard precool (should_precool()) runs instead.
+# When on, should_precool_aggressive()'s forecast-based trigger (cheap price now
+# + hot tomorrow -> cool to 19.5-20C) is allowed to fire. Stays on until you
+# manually turn it back off -- it does not auto-reset after triggering.
+AGGRESSIVE_PRECOOL_SWITCH = "input_boolean.aggressive_precool"
+
 # Price thresholds
 PRICE_FREE   = 1.0
 PRICE_LOW    = 5.0
@@ -505,6 +512,16 @@ def is_nursery_mode_on():
         return r.json()["state"] == "on"
     except Exception as e:
         logging.warning(f"Could not read nursery mode switch: {e}")
+        return False
+
+def is_aggressive_precool_on():
+    try:
+        headers = {"Authorization": f"Bearer {HA_TOKEN}"}
+        r = requests.get(f"{HA_URL}/api/states/{AGGRESSIVE_PRECOOL_SWITCH}", headers=headers, timeout=15)
+        r.raise_for_status()
+        return r.json()["state"] == "on"
+    except Exception as e:
+        logging.warning(f"Could not read aggressive precool switch: {e}")
         return False
 
 def get_nursery_temp():
@@ -1225,7 +1242,9 @@ def main():
         # bank cold air cheap before peak hours (12-7 PM). Price is the
         # decisive factor, not the capacity flag. Only restrict during
         # actual peak hours (handled below in the dynamic thermostat block).
-        aggressive, aggressive_target = should_precool_aggressive(hour_avg)
+        aggressive, aggressive_target = (False, None)
+        if is_aggressive_precool_on():
+            aggressive, aggressive_target = should_precool_aggressive(hour_avg)
         if aggressive:
             # Price ≤ 3¢ + hot tomorrow → cool aggressively to 19.5–20°C
             set_temperature(DYNAMIC_HEAT, aggressive_target)
