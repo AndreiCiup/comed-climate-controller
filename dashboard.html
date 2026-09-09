@@ -344,6 +344,24 @@
                 --
               </button>
             </div>
+            <div class="zone-humidity">
+              Mid-season mode:
+              <button
+                id="midseason-mode-status"
+                onclick="toggleMidSeasonMode()"
+                style="
+                  font: inherit;
+                  color: inherit;
+                  background: none;
+                  border: 1px solid currentColor;
+                  border-radius: 4px;
+                  padding: 1px 8px;
+                  cursor: pointer;
+                "
+              >
+                --
+              </button>
+            </div>
             <div class="stat-row">
               <span class="stat-label">Mode</span
               ><span class="stat-value" id="hvac-mode">--</span>
@@ -932,6 +950,24 @@
         btn.disabled = false;
       }
 
+      async function toggleMidSeasonMode() {
+        const btn = document.getElementById("midseason-mode-status");
+        btn.disabled = true;
+        try {
+          await fetch(HA_URL + "/api/services/input_boolean/toggle", {
+            method: "POST",
+            headers: haHeaders(),
+            body: JSON.stringify({
+              entity_id: "input_boolean.midseason_mode",
+            }),
+          });
+        } catch (e) {
+          console.error("Mid-season mode toggle failed:", e);
+        }
+        await update();
+        btn.disabled = false;
+      }
+
       async function updateThermoPro() {
         const basementTemp = await getEntity("sensor.tp350s_0b0b_temperature");
         const basementHum = await getEntity("sensor.tp350s_0b0b_humidity");
@@ -1098,6 +1134,15 @@
             aggressivePrecool.state === "on" ? "ON" : "OFF";
           aggressiveEl.style.color =
             aggressivePrecool.state === "on" ? "#00cc66" : "#555";
+        }
+
+        const midSeasonMode = await getEntity("input_boolean.midseason_mode");
+        const midSeasonEl = document.getElementById("midseason-mode-status");
+        if (midSeasonMode) {
+          midSeasonEl.textContent =
+            midSeasonMode.state === "on" ? "ON" : "OFF";
+          midSeasonEl.style.color =
+            midSeasonMode.state === "on" ? "#00cc66" : "#555";
         }
 
         const tLoc = await getEntity("device_tracker.lady_t_location");

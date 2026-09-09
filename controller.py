@@ -79,6 +79,19 @@ NURSERY_FLOOR_C     = 19.5  # never chase nursery comfort colder than this
 # manually turn it back off -- it does not auto-reset after triggering.
 AGGRESSIVE_PRECOOL_SWITCH = "input_boolean.aggressive_precool"
 
+# Mid-season outside-temperature mode switching -- manual switch
+# (input_boolean.midseason_mode in HA). When on, the controller watches
+# outside temperature and swaps climate.my_ecobee between heat/cool (auto)
+# and cool-only mode instead of running the nursery/precool/price logic
+# below -- takes priority over all of it while enabled, same override
+# pattern as nursery_mode. Between the two thresholds (dead band) the
+# controller holds whatever mode is already active rather than switching.
+MIDSEASON_MODE_SWITCH       = "input_boolean.midseason_mode"
+MIDSEASON_HEAT_COOL_BELOW_C = 19.0  # outside temp below this -> heat_cool (auto) mode
+MIDSEASON_COOL_ABOVE_C      = 22.0  # outside temp above this -> cool mode
+MIDSEASON_HEAT_SETPOINT_C   = 22.0  # heat setpoint while in heat_cool mode
+MIN_HEAT_COOL_GAP_C         = 1.7   # Ecobee's minimum heat/cool separation (~3F)
+
 # Price thresholds
 PRICE_FREE   = 1.0
 PRICE_LOW    = 5.0
@@ -309,6 +322,18 @@ def get_weather():
                 logging.warning(f"Weather fetch failed twice: {e}")
                 return None
 
+def get_current_outdoor_temp_c(weather_data, fallback):
+    """Forecasted temp for the CURRENT hour. weather_data['hourly'] starts
+    at local midnight, so index by the current hour rather than [0] (which
+    is last midnight's reading -- that [0] shortcut is already used
+    elsewhere in this file for the capacity-day check/kWh estimate and is
+    left as-is there, but mid-season mode switching needs an actual
+    current-conditions reading for its 19/22C comparisons)."""
+    try:
+        return weather_data["hourly"]["temperature_2m"][datetime.now(TZ).hour]
+    except Exception:
+        return fallback
+
 def analyze_tomorrow_weather():
     data = get_weather()
     if not data:
@@ -526,6 +551,16 @@ def is_aggressive_precool_on():
         logging.warning(f"Could not read aggressive precool switch: {e}")
         return False
 
+def is_midseason_mode_on():
+    try:
+        headers = {"Authorization": f"Bearer {HA_TOKEN}"}
+        r = requests.get(f"{HA_URL}/api/states/{MIDSEASON_MODE_SWITCH}", headers=headers, timeout=15)
+        r.raise_for_status()
+        return r.json()["state"] == "on"
+    except Exception as e:
+        logging.warning(f"Could not read mid-season mode switch: {e}")
+        return False
+
 def get_nursery_temp():
     """Master bedroom ThermoPro reading, converted F -> C (sensor reports F,
     same as the dashboard's fToC conversion)."""
@@ -576,6 +611,29 @@ def set_temperature(heat_c, cool_c):
                 time.sleep(5)
             else:
                 logging.error(f"Set temp failed twice: {e}")
+                raise
+
+def set_hvac_mode(mode):
+    headers = {
+        "Authorization": f"Bearer {HA_TOKEN}",
+        "Content-Type":  "application/json"
+    }
+    payload = {"entity_id": CLIMATE_ENTITY, "hvac_mode": mode}
+    for attempt in range(2):
+        try:
+            r = requests.post(
+                f"{HA_URL}/api/services/climate/set_hvac_mode",
+                headers=headers, json=payload, timeout=30
+            )
+            r.raise_for_status()
+            logging.info(f"Set hvac_mode -> {mode}")
+            return
+        except Exception as e:
+            if attempt == 0:
+                logging.warning(f"Set hvac_mode failed, retrying: {e}")
+                time.sleep(5)
+            else:
+                logging.error(f"Set hvac_mode failed twice: {e}")
                 raise
 # -- CAPACITY -----------------------------------------------------------------
 SAVINGS_HISTORY_FILE = "/config/www/savings_history.json"
@@ -1215,6 +1273,53 @@ def main():
     elif current_hour == 23:
         state["daily_report_sent"] = False
         state["daily_hours"]       = {}
+
+    # Mid-season outside-temp mode switching -- manual switch. When on,
+    # swaps climate.my_ecobee between heat/cool (auto) and cool-only mode
+    # based on outside temperature, and takes priority over nursery mode,
+    # aggressive precool, and the price-based dynamic thermostat below.
+    if is_midseason_mode_on():
+        outdoor_temp_c = get_current_outdoor_temp_c(w, current_temp_c) if w else current_temp_c
+        try:
+            current_mode = get_ha_state()["state"]
+        except Exception as e:
+            logging.error(f"Mid-season mode: could not read current hvac_mode: {e}")
+            current_mode = None
+
+        if outdoor_temp_c < MIDSEASON_HEAT_COOL_BELOW_C:
+            desired_mode = "heat_cool"
+        elif outdoor_temp_c > MIDSEASON_COOL_ABOVE_C:
+            desired_mode = "cool"
+        else:
+            desired_mode = current_mode  # dead band -- hold whatever mode is active
+
+        if desired_mode and current_mode and desired_mode != current_mode:
+            try:
+                set_hvac_mode(desired_mode)
+                logging.info(f"Mid-season: outside {outdoor_temp_c:.1f}C -> switching ecobee to {desired_mode} mode")
+            except Exception as e:
+                logging.error(f"Mid-season: failed to switch hvac_mode to {desired_mode}: {e}")
+            # Let HA settle into the new mode before pushing setpoints --
+            # set_temperature() reads live hvac_mode and would otherwise
+            # race the mode-change service call just issued; next cycle
+            # (5 min later) will see the updated mode and push correctly.
+            save_state(state)
+            return
+
+        target_cool = get_dynamic_cool(hour_avg, is_sleep_time())
+        if desired_mode == "heat_cool":
+            target_cool = max(target_cool, MIDSEASON_HEAT_SETPOINT_C + MIN_HEAT_COOL_GAP_C)
+
+        current_cool      = state.get("last_cool_setpoint", 23.5)
+        mins_since_update = minutes_since(state.get("last_thermostat_update", 0))
+        if abs(current_cool - target_cool) > 0.1 and mins_since_update >= THERMOSTAT_UPDATE_MINS:
+            new_cool = smooth_setpoint(current_cool, target_cool)
+            set_temperature(MIDSEASON_HEAT_SETPOINT_C, new_cool)
+            state["last_cool_setpoint"]     = new_cool
+            state["last_thermostat_update"] = time.time()
+            logging.info(f"Mid-season setpoint: heat {MIDSEASON_HEAT_SETPOINT_C}C / cool {new_cool}C (outside: {outdoor_temp_c:.1f}C, mode: {desired_mode})")
+        save_state(state)
+        return
 
     # Nursery comfort override -- manual switch. When on, holds the master
     # bedroom below NURSERY_MAX_C by cooling the whole house. Checked before
