@@ -1101,7 +1101,24 @@
         const ecobee = await getEntity("climate.my_ecobee");
         if (ecobee) {
           const indoorC = fToC(ecobee.attributes.current_temperature);
-          const targetC = fToC(ecobee.attributes.temperature);
+          // heat_cool (auto) mode has no single "temperature" attribute --
+          // HA reports target_temp_low/target_temp_high instead. Single-
+          // setpoint modes (cool, heat) keep using "temperature" as before.
+          let setpointText;
+          if (ecobee.attributes.temperature != null) {
+            setpointText = fToC(ecobee.attributes.temperature) + "°C";
+          } else if (
+            ecobee.attributes.target_temp_low != null &&
+            ecobee.attributes.target_temp_high != null
+          ) {
+            setpointText =
+              fToC(ecobee.attributes.target_temp_low) +
+              "–" +
+              fToC(ecobee.attributes.target_temp_high) +
+              "°C";
+          } else {
+            setpointText = "--";
+          }
           const action = ecobee.attributes.hvac_action || "idle";
           const dotColor =
             action === "cooling"
@@ -1112,7 +1129,7 @@
                   ? "#6688ff"
                   : "#555";
           document.getElementById("indoor").textContent = indoorC + "°C";
-          document.getElementById("setpoint").textContent = targetC + "°C";
+          document.getElementById("setpoint").textContent = setpointText;
           document.getElementById("hvac-mode").textContent = ecobee.state;
           document.getElementById("hvac-action").innerHTML =
             '<span class="dot" style="background:' +
