@@ -87,9 +87,18 @@ AGGRESSIVE_PRECOOL_SWITCH = "input_boolean.aggressive_precool"
 # pattern as nursery_mode. Between the two thresholds (dead band) the
 # controller holds whatever mode is already active rather than switching.
 MIDSEASON_MODE_SWITCH       = "input_boolean.midseason_mode"
-MIDSEASON_HEAT_COOL_BELOW_C = 19.0  # outside temp below this -> heat_cool (auto) mode
-MIDSEASON_COOL_ABOVE_C      = 22.0  # outside temp above this -> cool mode
-MIDSEASON_HEAT_SETPOINT_C   = 22.0  # heat setpoint while in heat_cool mode
+MIDSEASON_HEAT_COOL_BELOW_C = 19.5  # outside temp below this -> heat_cool (auto) mode
+MIDSEASON_COOL_ABOVE_C      = 20.5  # outside temp above this -> cool mode
+
+# Fixed heat/cool setpoints while in heat_cool (auto) mode, on a day/night
+# schedule. Cool-only mode is untouched by mid-season mode -- it keeps using
+# the existing price-based get_dynamic_cool() value, same as before.
+MIDSEASON_DAY_START_HOUR    = 6     # 6:00-20:59 -> day setpoints
+MIDSEASON_NIGHT_START_HOUR  = 21    # 21:00-05:59 -> night setpoints
+MIDSEASON_HEAT_DAY_C        = 22.5
+MIDSEASON_COOL_DAY_C        = 25.0
+MIDSEASON_HEAT_NIGHT_C      = 21.5
+MIDSEASON_COOL_NIGHT_C      = 24.0
 MIN_HEAT_COOL_GAP_C         = 1.7   # Ecobee's minimum heat/cool separation (~3F)
 
 # Price thresholds
@@ -243,6 +252,13 @@ def save_counters(counters):
 
 def is_sleep_time():
     return datetime.now(TZ).hour >= 22 or datetime.now(TZ).hour < 6
+
+def is_midseason_day():
+    """True during the 6am-9pm mid-season 'day' setpoint window (distinct
+    from is_sleep_time()'s 10pm-6am window -- mid-season's night window
+    starts an hour earlier, at 9pm)."""
+    hour = datetime.now(TZ).hour
+    return MIDSEASON_DAY_START_HOUR <= hour < MIDSEASON_NIGHT_START_HOUR
 
 def is_overnight_charging_window():
     return 0 <= datetime.now(TZ).hour < 6
@@ -560,6 +576,28 @@ def is_midseason_mode_on():
     except Exception as e:
         logging.warning(f"Could not read mid-season mode switch: {e}")
         return False
+
+def midseason_desired_mode(outdoor_temp_c, current_mode):
+    """Dead-band decision: below the low threshold -> heat_cool, above the
+    high threshold -> cool, in between -> hold whatever mode is already
+    active (prevents flapping right around the crossover)."""
+    if outdoor_temp_c < MIDSEASON_HEAT_COOL_BELOW_C:
+        return "heat_cool"
+    elif outdoor_temp_c > MIDSEASON_COOL_ABOVE_C:
+        return "cool"
+    return current_mode
+
+def midseason_targets(desired_mode, hour_avg, sleep):
+    """Returns (target_heat, target_cool). target_heat is None when
+    desired_mode is 'cool' -- cool-only mode ignores the heat setpoint
+    (see set_temperature()) and keeps the existing price-based cool value."""
+    if desired_mode == "heat_cool":
+        day = is_midseason_day()
+        target_heat = MIDSEASON_HEAT_DAY_C if day else MIDSEASON_HEAT_NIGHT_C
+        target_cool = MIDSEASON_COOL_DAY_C if day else MIDSEASON_COOL_NIGHT_C
+        target_cool = max(target_cool, target_heat + MIN_HEAT_COOL_GAP_C)
+        return target_heat, target_cool
+    return None, get_dynamic_cool(hour_avg, sleep)
 
 def get_nursery_temp():
     """Master bedroom ThermoPro reading, converted F -> C (sensor reports F,
@@ -1286,12 +1324,7 @@ def main():
             logging.error(f"Mid-season mode: could not read current hvac_mode: {e}")
             current_mode = None
 
-        if outdoor_temp_c < MIDSEASON_HEAT_COOL_BELOW_C:
-            desired_mode = "heat_cool"
-        elif outdoor_temp_c > MIDSEASON_COOL_ABOVE_C:
-            desired_mode = "cool"
-        else:
-            desired_mode = current_mode  # dead band -- hold whatever mode is active
+        desired_mode = midseason_desired_mode(outdoor_temp_c, current_mode)
 
         if desired_mode and current_mode and desired_mode != current_mode:
             try:
@@ -1306,18 +1339,28 @@ def main():
             save_state(state)
             return
 
-        target_cool = get_dynamic_cool(hour_avg, is_sleep_time())
-        if desired_mode == "heat_cool":
-            target_cool = max(target_cool, MIDSEASON_HEAT_SETPOINT_C + MIN_HEAT_COOL_GAP_C)
+        target_heat, target_cool = midseason_targets(desired_mode, hour_avg, is_sleep_time())
 
         current_cool      = state.get("last_cool_setpoint", 23.5)
         mins_since_update = minutes_since(state.get("last_thermostat_update", 0))
-        if abs(current_cool - target_cool) > 0.1 and mins_since_update >= THERMOSTAT_UPDATE_MINS:
+
+        if target_heat is not None:
+            current_heat = state.get("last_heat_setpoint", target_heat)
+            changed = abs(current_heat - target_heat) > 0.1 or abs(current_cool - target_cool) > 0.1
+        else:
+            changed = abs(current_cool - target_cool) > 0.1
+
+        if changed and mins_since_update >= THERMOSTAT_UPDATE_MINS:
             new_cool = smooth_setpoint(current_cool, target_cool)
-            set_temperature(MIDSEASON_HEAT_SETPOINT_C, new_cool)
+            if target_heat is not None:
+                new_heat = smooth_setpoint(current_heat, target_heat)
+                state["last_heat_setpoint"] = new_heat
+            else:
+                new_heat = state.get("last_heat_setpoint", MIDSEASON_HEAT_DAY_C)  # unused by set_temperature() in cool-only mode
+            set_temperature(new_heat, new_cool)
             state["last_cool_setpoint"]     = new_cool
             state["last_thermostat_update"] = time.time()
-            logging.info(f"Mid-season setpoint: heat {MIDSEASON_HEAT_SETPOINT_C}C / cool {new_cool}C (outside: {outdoor_temp_c:.1f}C, mode: {desired_mode})")
+            logging.info(f"Mid-season setpoint: heat {new_heat}C / cool {new_cool}C (outside: {outdoor_temp_c:.1f}C, mode: {desired_mode})")
         save_state(state)
         return
 
