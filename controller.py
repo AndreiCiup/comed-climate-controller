@@ -108,6 +108,10 @@ PRICE_NORMAL = 9.0
 PRICE_HIGH   = 12.0
 PRICE_EXTREME = 15.0   
 
+# Paused: low-price alert, 5 PM forecast, 10:30 PM daily report, capacity
+# warnings. The 8 AM morning report still sends. Set False to resume.
+PRICE_EMAILS_PAUSED = True
+
 # Capacity
 CAPACITY_MONTHS   = [6, 7, 8, 9]
 CAPACITY_HOURS    = range(12, 19)
@@ -173,7 +177,11 @@ if TZ is not None:
 
 # -- HVAC SAVINGS -------------------------------------------------------------
 
-def get_hvac_kwh_per_hour(outdoor_temp_c):
+def get_hvac_kwh_per_hour(outdoor_temp_c, hvac_mode=None):
+    # Heating isn't electric, so it uses no billable HVAC kWh.
+    if hvac_mode == "heat":    return 0.0
+    if hvac_mode == "heat_cool" and outdoor_temp_c < MIDSEASON_HEAT_COOL_BELOW_C:
+        return 0.0
     if outdoor_temp_c > 32:    return 2.39
     elif outdoor_temp_c > 28:  return 1.88
     elif outdoor_temp_c > 22:  return 1.20
@@ -738,7 +746,7 @@ def check_capacity_day(state):
         if f and f["capacity_day"] and now.month in CAPACITY_MONTHS:
             state["capacity_day"] = True
             logging.info("Tomorrow flagged as capacity day")
-            send_email(
+            send_price_email(
                 "Warning: Capacity Day Tomorrow",
                 f"Tomorrow afternoon forecast: {f['max_afternoon']:.1f}C\n\n"
                 f"System will:\n"
@@ -788,7 +796,7 @@ def handle_capacity_peak(state, hour_avg, current_temp):
     counters["capacity_peaks"] += 1
     save_counters(counters)
 
-    send_email(
+    send_price_email(
         "Warning: Capacity Peak - Reduce Usage Now!",
         f"Price: {hour_avg:.2f}c/kWh | Temp: {current_temp:.1f}C\n"
         f"Time: {datetime.now(TZ).strftime('%I:%M %p')}\n\n"
@@ -1123,6 +1131,12 @@ def send_email(subject, body):
     except Exception as e:
         logging.error(f"Email failed: {e}")
 
+def send_price_email(subject, body):
+    if PRICE_EMAILS_PAUSED:
+        logging.info(f"Email paused: {subject}")
+        return
+    send_email(subject, body)
+
 def send_morning_report(state):
     try:
         tesla       = get_tesla_state()
@@ -1225,7 +1239,7 @@ def main():
     # Low price alert
     if hour_avg <= PRICE_LOW:
         if not state.get("low_alert_sent"):
-            send_email(
+            send_price_email(
                 f"Low Price Alert: {hour_avg:.2f}c/kWh",
                 f"Current price: {hour_avg:.2f}c/kWh\n"
                 f"Great time to run dishwasher, laundry!\n"
@@ -1253,7 +1267,7 @@ def main():
                 elif forecast["expensive"]:      action = "Pre-cooling slightly tonight."
                 else:                            action = "Normal prices expected."
                 cap_note = "\nWARNING: CAPACITY DAY TOMORROW - Avoid heavy usage 2-6 PM!" if forecast.get("capacity_day") else ""
-                send_email(
+                send_price_email(
                     f"Evening Forecast - {(now + timedelta(days=1)).strftime('%B %d')}",
                     f"TOMORROW:\n"
                     f"High: {forecast['max_temp']:.1f}C | Afternoon: {forecast['max_afternoon']:.1f}C\n"
@@ -1274,7 +1288,11 @@ def main():
             if hours_data:
                 avg_today   = sum(hours_data) / len(hours_data)
                 hours_beat  = sum(1 for h in hours_data if h < FLAT_RATE)
-                kwh_per_hr  = get_hvac_kwh_per_hour(current_temp_c)
+                try:
+                    hvac_mode = get_ha_state()["state"]
+                except Exception:
+                    hvac_mode = None
+                kwh_per_hr  = get_hvac_kwh_per_hour(current_temp_c, hvac_mode)
                 savings     = (FLAT_RATE - avg_today) / 100 * (len(hours_data) * kwh_per_hr)
                 events      = state.get("tesla_events", [])
                 n_paused    = sum(1 for e in events if e["action"] == "stopped")
@@ -1292,7 +1310,7 @@ def main():
                     tesla_line = f"Battery: {tesla['battery']:.0f}%\n" if tesla["plugged_in"] and tesla["battery"] else ""
                 except:
                     tesla_line = ""
-                send_email(
+                send_price_email(
                     f"Daily Energy Report - {now.strftime('%B %d')}",
                     f"HOUSE:\n"
                     f"Avg price:      {avg_today:.2f}c/kWh\n"
